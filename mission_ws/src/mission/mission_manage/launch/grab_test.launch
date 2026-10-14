@@ -1,0 +1,32 @@
+<?xml version="1.0"?>
+
+<launch>
+    
+    <arg name="arm_dir" default="left"/>
+
+    <rosparam command="load" file="$(find user_params)/params/arm_config.yaml" />
+    <rosparam command="load" file="$(find user_params)/params/camera_ep_config.yaml" />
+    <rosparam command="load" file="$(find mission_manage)/params/mission_params.yaml" />
+
+    <include file="$(find ascamera)/launch/hp60c.launch" />
+
+    <include file="$(find yolov5_rknn)/launch/yolov5_rknn_rc.launch" >
+        <arg name="open_camera" value="false" />
+        <arg name="yolo_visualize" value="false" />
+    </include>
+
+    <group ns="arm_$(arg arm_dir)">
+
+        <param name="robot_description" textfile="$(find arm)/urdf/arm.urdf" />
+
+        <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher">
+            <param name="tf_prefix" value="arm_$(arg arm_dir)" />
+        </node>
+
+        <node pkg="arm" type="arm_control_node.py" name="arm_control_node" output="screen" />
+        <node pkg="arm" type="arm_ik_node" name="arm_ik_node" output="screen" />
+        <node pkg="mission_manage" type="grab_test.py" name="grab_test" output="screen" />    
+        
+    </group>
+
+</launch>

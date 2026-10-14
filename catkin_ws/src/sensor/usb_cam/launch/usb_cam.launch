@@ -1,0 +1,19 @@
+<?xml version="1.0"?>
+
+<launch>
+    
+    <arg name="camera_name" default="usb_cam" />
+    <arg name="visualize" default="true" />
+
+    <rosparam command="load" file="$(find user_params)/params/$(arg camera_name)_config.yaml" />
+    
+    <group ns="$(arg camera_name)">
+    
+        <param name="camera_name" value="$(arg camera_name)" />
+        <param name="visualize" value="$(arg visualize)" />
+        
+        <node pkg="usb_cam" type="usb_cam_node" name="usb_cam" output="screen" />
+
+    </group>
+
+</launch>

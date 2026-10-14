@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+
+<launch>
+
+    <rosparam command="load" file="$(find user_params)/params/chassis_config.yaml" />
+
+    <node pkg="chassis" name="chassis" type="chassis_control_node.py" output="screen" />
+    
+    <node pkg="chassis" name="chassis_key_control" type="car_key_control_node.py" output="screen" />
+
+</launch>

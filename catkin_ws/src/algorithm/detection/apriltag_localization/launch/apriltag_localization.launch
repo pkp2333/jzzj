@@ -1,0 +1,15 @@
+<?xml version="1.0"?>
+
+<launch>
+    
+    <arg name="visualize" default="true" />
+    
+    <rosparam command="load" file="$(find apriltag_localization)/params/apriltag_localization_ascamera.yaml" />
+    
+    <include file="$(find ascamera)/launch/hp60c.launch" />
+
+    <node pkg="apriltag_localization" type="apriltag_localization_node" name="apriltag_localization" output="screen" >
+        <param name="visualize" value="$(arg visualize)" />
+    </node>
+
+</launch>

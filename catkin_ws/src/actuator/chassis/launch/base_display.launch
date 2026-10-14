@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+
+<launch>
+    
+    <param name="robot_description" textfile="$(find chassis)/urdf/car_chassis.urdf" />
+    <param name="use_gui" value="false"/>
+    <arg name="open_rviz" default="true"/>
+
+    <node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher" />
+    <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher" />
+
+    <group if="$(arg open_rviz)"> 
+        <node pkg="rviz" type="rviz" name="rviz" required="true"
+              args="-d $(find chassis)/rviz/car_chassis.rviz"/>
+    </group>
+</launch>
+

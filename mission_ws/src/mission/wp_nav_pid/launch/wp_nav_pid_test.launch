@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+
+<launch>
+    <!-- 定义参数 -->
+    <arg name="tag_visualize" default="false" />
+    <arg name="rviz" default="true" />
+    <arg name="tune" default="false" />
+    <arg name="tune_x" default="false" />
+    <arg name="tune_y" default="false" />
+    <arg name="tune_w" default="false" />
+
+    <!-- 从yaml文件加载参数 -->
+    <!-- 加载 x y yaw 的修正PID参数 -->
+    <rosparam command="load" file="$(find wp_nav_pid)/params/wp_nav_pid.yaml" />
+      <!-- 加载底盘参数及其限制、键盘控制限制 -->
+    <rosparam command="load" file="$(find user_params)/params/chassis_config.yaml" />
+
+    <!-- 套用另外一个launch，设置rviz启动以及tag_visualize不启动 -->
+    <include file="$(find car_localization)/launch/car_localization.launch" >
+        <arg name="visualize" value="$(arg tag_visualize)" />
+        <arg name="rviz" value="$(arg rviz)" />
+    </include>
+    
+    <!-- PID导航 -->
+    <node pkg="wp_nav_pid" type="wp_nav_pid_node.py" name="wp_nav_pid_node" output="screen" /> 
+
+    <node pkg="chassis" name="chassis" type="chassis_control_node.py" output="screen" />
+
+    <group if="$(arg tune)">
+        <group if="$(arg tune_x)">
+            <group ns="pid_x">
+                <!-- 滑动条PID调参 x -->
+                <node pkg="wp_nav_pid" type="pid_tuner.py" name="pid_tuner_x" output="screen" />
+            </group>
+        </group>
+
+        <group if="$(arg tune_y)">
+            <group ns="pid_y">
+            <!-- 滑动条PID调参 y -->
+                <node pkg="wp_nav_pid" type="pid_tuner.py" name="pid_tuner_y" output="screen" />
+            </group>
+        </group>
+
+        <group if="$(arg tune_w)">
+            <group ns="pid_yaw">
+            <!-- 滑动条PID调参 yaw -->
+                <node pkg="wp_nav_pid" type="pid_tuner.py" name="pid_tuner_yaw" output="screen" />
+            </group>
+        </group>
+    </group>
+
+</launch>

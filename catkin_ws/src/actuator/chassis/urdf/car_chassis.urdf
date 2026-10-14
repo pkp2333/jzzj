@@ -1,0 +1,52 @@
+<?xml version="1.0"?>
+
+<robot name="myroobt">
+	<link name="base_link">
+		<visual>
+			<geometry>
+				<box size="0.34 0.17 0.14"/>
+			</geometry>
+			<material name="grey">
+				<color rgba="0.5 0.5 0.5 0.9"/>
+			</material>
+		</visual>
+	</link>
+	
+	<link name="laser">
+		<visual>
+			<geometry>
+				<cylinder length="0.03" radius="0.035"/>
+			</geometry>
+			<material name="black">
+				<color rgba="0 0 0 1"/>
+			</material>
+			<origin xyz="0 0 0" rpy="0 0 0 "/>
+		</visual>
+	</link>
+	<joint name="laser_joint" type="fixed">
+		<parent link="base_link"/>
+		<child link="laser"/>
+		<origin rpy="0 0 0" xyz="-0.05 0 0.085"/>
+		<axis xyz="0 0 0"/>
+	</joint>
+	
+	<link name="camera">
+		<visual>
+			<geometry>
+				<cylinder length="0.1" radius="0.035"/>
+			</geometry>
+			<material name="white">
+				<color rgba="1 1 1 1"/>
+			</material>
+			<origin xyz="0 0 0" rpy="0 0 0 "/>
+		</visual>
+	</link>
+	<joint name="camera_joint" type="fixed">
+		<parent link="base_link"/>
+		<child link="camera"/>
+		<origin rpy="0 0 0" xyz="0.08 0 0.12"/>
+		<axis xyz="0 0 0"/>
+	</joint>
+	
+</robot>
+

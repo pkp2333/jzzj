@@ -1,0 +1,57 @@
+<?xml version="1.0"?>
+
+<launch>
+    
+    <arg name="visualize" default="true" />
+    
+    <rosparam command="load" file="$(find user_params)/params/arm_config.yaml" />
+    <rosparam command="load" file="$(find user_params)/params/chassis_config.yaml" />
+    <rosparam command="load" file="$(find user_params)/params/camera_ep_config.yaml" />
+    <rosparam command="load" file="$(find apriltag_localization)/params/apriltag_localization_ascamera.yaml" />
+    <rosparam command="load" file="$(find car_localization)/params/tag_pose.yaml" />
+    <rosparam command="load" file="$(find wp_nav_pid)/params/wp_nav_pid.yaml" />
+    <rosparam command="load" file="$(find mission_manage)/params/mission_params.yaml" />
+
+    <include file="$(find deepseek)/launch/deepseek.launch" />
+    
+    <include file="$(find usb_cam)/launch/usb_cam.launch" />
+    <include file="$(find ascamera)/launch/hp60c.launch" />
+
+    <include file="$(find yolov5_rknn)/launch/yolov5_rknn_rc.launch" >
+        <arg name="open_camera" value="false"/>
+    </include>
+
+    <include file="$(find car_localization)/launch/car_localization.launch" >
+        <arg name="open_camera" value="false" />
+        <arg name="visualize" value="true" />
+        <arg name="rviz" value="false" />
+    </include>
+
+    <node pkg="wp_nav_pid" type="wp_nav_pid_node.py" name="wp_nav_pid_node" output="screen" /> 
+
+    <node pkg="chassis" name="chassis" type="chassis_control_node.py" output="screen" />
+
+    <group ns="arm_left">
+        <param name="robot_description" textfile="$(find arm)/urdf/arm.urdf" />
+        <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher">
+            <param name="tf_prefix" value="arm_left" />
+        </node>
+        <node pkg="arm" type="arm_control_node.py" name="arm_control_node" />
+        <node pkg="arm" type="arm_ik_node" name="arm_ik_node" output="screen" />
+    </group>
+
+    <group ns="arm_right">
+        <param name="robot_description" textfile="$(find arm)/urdf/arm.urdf" />
+        <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher">
+            <param name="tf_prefix" value="arm_right" />
+        </node>
+        <node pkg="arm" type="arm_control_node.py" name="arm_control_node" />
+        <node pkg="arm" type="arm_ik_node" name="arm_ik_node" output="screen" />
+    </group>
+
+    <node pkg="mission_manage" type="grab_test_left.py" name="grab_test_left" output="screen"/>    
+    <node pkg="mission_manage" type="grab_test_right.py" name="grab_test_right" output="screen"/>    
+
+    <node pkg="mission_manage" type="mission_manage_node.py" name="mission_manage" output="screen" />    
+
+</launch>

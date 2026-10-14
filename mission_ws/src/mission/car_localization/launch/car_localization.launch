@@ -1,0 +1,42 @@
+<?xml version="1.0"?>
+
+<launch>
+    
+    <!-- 参数设置 -->
+    <arg name="open_camera" default="true" />
+    <arg name="visualize" default="false" />
+    <arg name="rviz" default="true" />
+    
+    <!-- 从yaml加载参数 -->
+
+    <!-- 加载底盘参数及其限制、键盘控制限制 -->
+    <rosparam command="load" file="$(find user_params)/params/chassis_config.yaml" />
+    
+    <rosparam command="load" file="$(find apriltag_localization)/params/apriltag_localization_ascamera.yaml" />
+    <rosparam command="load" file="$(find car_localization)/params/tag_pose.yaml" />
+
+    <group if="$(arg open_camera)"> 
+        <include file="$(find ascamera)/launch/hp60c.launch" />
+        <include file="$(find usb_cam)/launch/usb_cam.launch" />
+    </group> 
+    
+    <node pkg="apriltag_localization" type="apriltag_localization_node" name="apriltag_localization" output="screen" >
+        <param name="visualize" value="$(arg visualize)" />
+    </node>
+
+    <node pkg="apriltag_localization" type="apriltag_localization_test_node" name="back_apriltag_localization" output="screen" >
+        <param name="visualize" value="$(arg visualize)" />
+    </node>
+
+    <!-- 发布小车的位置信息，通过融合深度相机数据，使用卡尔曼滤波获取具体的位置信息，并且会以话题的形式进行发布，topic如下：car_pose_filt_map -->
+    <node pkg="car_localization" type="car_localization_node.py" name="car_localization_node" output="screen" />
+    <node pkg="car_localization" type="car_localization_test_node.py" name="car_localization_test_node" output="screen" />
+
+    <!-- 调用对应的rviz参数设置 -->
+    <group if="$(arg rviz)"> 
+        <node type="rviz" name="rviz" pkg="rviz" 
+              args="-d $(find wp_nav_pid)/rviz/wp_nav.rviz" output="log" respawn="true" />
+    </group>
+
+
+</launch>

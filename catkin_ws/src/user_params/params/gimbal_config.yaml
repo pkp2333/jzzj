@@ -1,0 +1,12 @@
+gimbal:
+    i2c_bus:      1  # GPIO Pin Name of I2C Bus
+    i2c_address:  0x40
+
+    id_pitch:     1
+    id_yaw:       0
+
+    differ_pitch: 0
+    differ_yaw:   0
+
+    range_pitch: [-28, 28]  # °
+    range_yaw: [-90, 90]  # °

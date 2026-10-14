@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+
+<launch>
+    
+    <arg name="arm_dir" default="left"/>
+
+    <rosparam command="load" file="$(find mission_manage)/params/mission_params.yaml" />
+
+    <include file="$(find ascamera)/launch/hp60c.launch" />
+
+    <node pkg="mission_manage" type="basket_seq_test.py" name="basket_seq_test" output="screen" />    
+        
+</launch>

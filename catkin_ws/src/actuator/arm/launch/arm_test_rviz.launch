@@ -1,0 +1,25 @@
+<?xml version="1.0"?>
+
+<launch>
+
+    <arg name="arm_dir" default="left"/>
+
+    <rosparam command="load" file="$(find user_params)/params/arm_config.yaml" />
+
+    <group ns="arm_$(arg arm_dir)">
+
+        <param name="robot_description" textfile="$(find arm)/urdf/arm.urdf" />
+
+        <node name="robot_state_publisher" pkg="robot_state_publisher" type="robot_state_publisher">
+            <param name="tf_prefix" value="arm_$(arg arm_dir)" />
+        </node>
+
+        <node pkg="arm" type="arm_test_node.py" name="arm_test_node" output="screen" />
+        <node pkg="arm" type="arm_control_node.py" name="arm_control_node"  output="screen"  />
+        <node pkg="arm" type="arm_ik_node" name="arm_ik_node" output="screen" />
+        
+    </group>
+
+    <node pkg="rviz" type="rviz" name="arm_$(arg arm_dir)rviz" args="-d $(find arm)/rviz/arm_$(arg arm_dir).rviz" />
+
+</launch>
