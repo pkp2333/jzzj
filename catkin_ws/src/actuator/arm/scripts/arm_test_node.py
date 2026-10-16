@@ -15,12 +15,11 @@ from std_msgs.msg import Bool
 from sensor_msgs.msg import JointState
 from geometry_msgs.msg import PoseStamped
 
-
+saved_joint_angles = [0, 0, 90, 90, 0]
 arm_ik_servo_degree = JointState()
 get_cmd_ik = False
 
 def dh_matrix(theta, d, a, alpha):
-    """计算单个关节的DH变换矩阵"""
     ct = np.cos(theta)
     st = np.sin(theta)
     ca = np.cos(alpha)
@@ -33,35 +32,29 @@ def dh_matrix(theta, d, a, alpha):
     ])
 
 def fkine_5dof(q, dh_params):
-    """6自由度机械臂正运动学计算"""
     T = np.eye(4)
     for i in range(6):
         theta, d, a, alpha = dh_params[i]
         T_i = dh_matrix(q[i] + theta, d, a, alpha)
-        T = T @ T_i  # 矩阵连乘
+        T = T @ T_i
     return T
 
 def radians_list(degrees):
-    """将角度列表转换为弧度"""
     return [np.radians(deg) for deg in degrees]
 
-# 根据URDF文件精确修正的DH参数 (单位：米和弧度)
 dh_params = [
     [0, 0.305, 0, -np.pi/2],
-    [0, 0.085, 0.0, np.pi/2],  # 关节1rp
-    [0, 0.0, 0.085, 0],  # 关节2
-    [0, 0.0, 0.085, 0],  # 关节3
-    [0, 0.0, 0.075, 0],  # 关节4
-    [0, 0.0, 0.0, np.pi/2],  # 关节5
+    [0, 0.085, 0.0, np.pi/2],
+    [0, 0.0, 0.085, 0],
+    [0, 0.0, 0.085, 0],
+    [0, 0.0, 0.075, 0],
+    [0, 0.0, 0.0, np.pi/2],
 ]
 
 def print_pose(T):
-    """打印位姿矩阵并提取位置和欧拉角"""
     position = T[:3, 3]
     rotation = T[:3, :3]
-
-    # 计算欧拉角(ZYX顺序)
-    sy = np.sqrt(rotation[0, 0] * rotation[0, 0] + rotation[1, 0] * rotation[1, 0])
+    sy = np.sqrt(rotation[0, 0]**2 + rotation[1, 0]**2)
     singular = sy < 1e-6
 
     if not singular:
@@ -74,22 +67,16 @@ def print_pose(T):
         yaw = 0
 
     print("\n末端位置 (m):", np.round(position*100, 4))
-    print("欧拉角 (rad, ZYX):", np.round([yaw, pitch, roll], 4))
-    # print("变换矩阵:\n", np.round(T, 4))
-
-
-
+    print("欧拉角 (deg):", np.round([yaw, pitch, roll], 4))
 
 def signal_handler(sig, frame):
-    rospy.signal_shutdown('User interrupted')
+    rospy.signal_shutdown("User interrupted")
     sys.exit(0)
-
 
 def arm_ik_servo_degree_cb(msg:JointState):
     global arm_ik_servo_degree, get_cmd_ik
     arm_ik_servo_degree = msg
     get_cmd_ik = True
-
 
 def main():
     global arm_ik_servo_degree, get_cmd_ik
@@ -100,309 +87,294 @@ def main():
     arm_ns = rospy.get_namespace()
     arm_dir = arm_ns[5:-1]
 
-    if arm_dir in ['l', 'L', 'left', 'Left', 'LEFT']:
+    if arm_dir.lower() in ['l', 'left']:
         lr = 1
-    elif arm_dir in ['r', 'R', 'right', 'Right', 'RIGHT']:
+    elif arm_dir.lower() in ['r', 'right']:
         lr = 0
     else:
         lr = 1
 
     arm_front = rospy.get_param('turn_front', 90)
+    curr_ang = [0, 0, 90, 90, 0, 60]  # 兜底初始角度，防止未 std/a 直接 b/gN 触发 UnboundLocalError
     arm_middle = rospy.get_param('turn_middle', 0)
     arm_back = rospy.get_param('turn_back', -90)
     claw_tight = rospy.get_param('claw_tight', 30)
     claw_loose = rospy.get_param('claw_loose', 60)
-    delta_servo = []
-    for i in range(1, 7):
-        delta_servo.append(rospy.get_param(f'delta_servo_{i}', 0))
+    delta_servo = [rospy.get_param('delta_servo_%d'%i, 0) for i in range(1,7)]
 
     tf_buffer = tf2_ros.Buffer()
     tf_listener = tf2_ros.TransformListener(tf_buffer)
     
-    rospy.loginfo(f"机械臂测试节点初始化中...\n")
-
+    rospy.loginfo("机械臂测试节点初始化中...")
     Arm = Arm_Device(lr=arm_dir)
-    time.sleep(.01)
+    time.sleep(0.01)
 
     arm_servo_degree = JointState()
-    arm_servo_degree.name = ["joint1", "joint2", "joint3", "joint4", "joint5", "joint6"]
+    arm_servo_degree.name = ["joint1","joint2","joint3","joint4","joint5","joint6"]
 
     arm_servo_degree_sub = rospy.Subscriber("arm_ik_servo_degree", JointState, arm_ik_servo_degree_cb)
-    
     arm_torque_pub = rospy.Publisher('arm_torque_state', Bool, queue_size=3)
     arm_servo_degree_pub = rospy.Publisher('arm_joint_states', JointState, queue_size=3)
     tar_pose_car_pub = rospy.Publisher('tar_pose_car', PoseStamped, queue_size=3)
     arm_target_pose_pub = rospy.Publisher('arm_target', PoseStamped, queue_size=3)
 
     time.sleep(6)
-
-    print("arm_servo_degree:",arm_servo_degree)
     arm_wait(arm_middle, claw_loose, arm_servo_degree, arm_servo_degree_pub)
-
-    rospy.loginfo(f"机械臂测试节点成功初始化!\n")
+    rospy.loginfo("机械臂测试节点启动成功!")
     
     r = rospy.Rate(10)
 
     while not rospy.is_shutdown():
-        command = input('\n代号       指令'
-                        '\ntoff      关闭力矩'
-                        '\nton       打开力矩'
-                        '\nrd        读取角度'
-                        '\nrp        读取末端位姿'
-                        '\nstd       设定角度'
-                        '\nstp       设定末端位姿'
-                        '\nwf        前转待命'
-                        '\nwm        居中待命'
-                        '\nwb        后转待命'
-                        '\ng         抓取'
-                        '\np         放置'
-                        '\nq         退出'
-                        '\n>>>')
+        command = input('\n代号       指令\n\ntoff      关闭力矩\nton       打开力矩\nrd        读取角度\nrp        读取末端位姿\nstd       设定角度\nstp       设定末端位姿\nwf        前转待命\nwm        居中待命\nwb        后转待命\ng         抓取\np         放置\nq         退出\ng1~g6     对应舵机+8度\nb1~b6     对应舵机-8度\nok        一键抓取复位\na  手动输入摆动角度\nb  收回待命\n\n>>>')
+                        
         if command == "toff":
             Arm.Arm_serial_set_torque(0)
-            time.sleep(.5)
-            print("\n机械臂舵机力矩已关闭, 可以掰动\n")
+            time.sleep(0.5)
+            print("\n力矩已关闭")
+            
         elif command == "ton":
             Arm.Arm_serial_set_torque(1)
-            time.sleep(.5)
-            print("\n机械臂舵机力矩已启动\n")
+            time.sleep(0.5)
+            print("\n力矩已开启")
 
         elif command == "rd":
-            print("\n当前指令  读取角度\n")
+            print("\n读取角度")
             Arm.Arm_serial_set_torque(0)
-            time.sleep(.5)
-            print("\n机械臂舵机力矩已关闭, 可以掰动\n")
-            input("\n当机械臂掰动到位后请输按回车\n")
+            input("\n调整到位后按回车")
             arm_torque_pub.publish(Bool(False))
-            time.sleep(.5)
-            ang = [0, 0, 0, 0, 0, 0]
+            time.sleep(0.5)
+            ang = [0]*6
             for i in range(6):
-                ang[i] = Arm.Arm_serial_servo_read(i + 1)
-                if ang[i] is None:
-                    continue
-                print("第" + str(i + 1) + "号舵机角度为 ", ang[i] - delta_servo[i], " °")
-                Arm.Arm_serial_servo_write(i + 1, ang[i], 800)
-                time.sleep(.1)
-            print(f"\n[{ang[0]}, {ang[1]}, {ang[2]}, {ang[3]}, {ang[4]}, {ang[5]}]\n")
+                ang[i] = Arm.Arm_serial_servo_read(i+1)
+                if ang[i] is not None:
+                    print("舵机%d: %.1f 度" % (i+1, ang[i]-delta_servo[i]))
+                    #Arm.Arm_serial_servo_write(i+1, ang[i], 800)
+                    time.sleep(0.1)
+            print("\n[%s]" % ", ".join(map(str, ang)))
             Arm.Arm_serial_set_torque(1)
-            time.sleep(.5)
+            time.sleep(0.5)
             arm_torque_pub.publish(Bool(True))
-            print("\n机械臂舵机力矩已启动\n")
-            trans = tf_buffer.lookup_transform('car_base_link', f'{arm_ns[1:]}link5', rospy.Time(0))
-            position = trans.transform.translation
-            x, y, z = position.x, position.y, position.z
-            orientation = trans.transform.rotation
-            quat = [orientation.x, orientation.y, orientation.z, orientation.w]
-            roll, pitch, yaw = euler_from_quaternion(quat)
-            print("\n末端相对于 car_base_link 的位姿\n[x, y, z, R, P, Y]  cm °\n%.1f %.1f %.1f %.1f %.1f %.1f" 
-                  % (x*100, y*100, z*100, np.rad2deg(roll), np.rad2deg(pitch), np.rad2deg(yaw)))
+            print("\n力矩已开启")
             
         elif command == "rp":
-            print("\n当前指令  读取末端位姿\n")
-            trans = tf_buffer.lookup_transform('car_base_link', f'{arm_ns[1:]}link5', rospy.Time(0))
-            position = trans.transform.translation
-            print("Translation:", trans.transform.translation)
-            print("Rotation:", trans.transform.rotation)
-            x, y, z = position.x, position.y, position.z
-            orientation = trans.transform.rotation
-            quat = [orientation.x, orientation.y, orientation.z, orientation.w]
-            roll, pitch, yaw = euler_from_quaternion(quat)
-            print("\n末端相对于 car_base_link 的位姿\n[x, y, z, R, P, Y]  cm °\n%.1f %.1f %.1f %.1f %.1f %.1f" 
-                  % (x*100, y*100, z*100, np.rad2deg(roll), np.rad2deg(pitch), np.rad2deg(yaw)))
-            ang_test = [0, 0, 0, 0, 0, 0]
-            ang_test_ = [0, 0, 0, 0, 0, 0, 0]
-            for i in range(6):
-                ang_test[i] = Arm.Arm_serial_servo_read(i+1) - delta_servo[i]
-                if ang_test[i] is None:
-                    continue
-                print("第" + str(i + 1) + "号舵机角度为 ", ang_test[i], " °")
-                time.sleep(.1)
-
-            for m in range(6):
-                ang_test_[m+1] = ang_test[m]
-            ang_test_[1] =  -ang_test[0] - 90
-            ang_test_[2] =  -ang_test[1] - 90
-
-            q = radians_list(ang_test_)
-            for i in range(6):
-                print(str(i+1)+"号舵机角度为:", ang_test_[i])
-                time.sleep(.1)
-            T = fkine_5dof(q, dh_params)
-            print_pose(T)
+            trans = tf_buffer.lookup_transform('car_base_link', '%slink5'%arm_ns[1:], rospy.Time(0))
+            x,y,z = trans.transform.translation.x, trans.transform.translation.y, trans.transform.translation.z
+            q = [trans.transform.rotation.x,trans.transform.rotation.y,trans.transform.rotation.z,trans.transform.rotation.w]
+            roll,pitch,yaw = euler_from_quaternion(q)
+            print("\n末端位姿 x=%.1f y=%.1f z=%.1f r=%.1f p=%.1f y=%.1f" % (x*100, y*100, z*100, np.rad2deg(roll), np.rad2deg(pitch), np.rad2deg(yaw)))
 
         elif command == "std":
-            print("\n当前指令  设定角度\n")
-            num = input("\n请输入目标角度°(六个舵机, 以空格隔开): \n>>>")
+            num = input("\n输入6个角度: ")
             try:
-                degree = [int(n) for n in num.split(" ")]
+                degree = list(map(int, num.split()))
+                curr_ang=degree
             except:
-                print("\n输入有误\n")
+                print("输入错误")
                 continue
-            if len(degree) != 6:
-                rospy.logerr("目标角度数量不匹配!")
+            if len(degree)!=6:
+                print("必须输入6个角度")
                 continue
             arm_servo_degree.position = radians_list(degree)
             arm_servo_degree.header.stamp = rospy.Time.now()
             arm_servo_degree_pub.publish(arm_servo_degree)
-            
-            ang_test = [0,0,0,0,0,0,0]
-            for m in range(6):
-                ang_test[m+1] = degree[m]
-
-            ang_test[1] *= -1
-            ang_test[2] *= -1
-            ang_test[1] -= 90
-            ang_test[2] -= 90
-            
-            # for i in range(6):
-            #     print(str(i)+"号舵机角度为:", ang_test[i])
-            #     time.sleep(.1)
-
-            q = radians_list(ang_test)
-            T = fkine_5dof(q, dh_params)
-            print_pose(T)
-
+                   
+            time.sleep(1.2)
 
         elif command == "stp":
-            print("\n当前指令  设定位置\n")
-            num = input("\n请输入目标位置(x y z r p y, 以空格隔开)\n"
-                        "x正方向指向车体前方 y正方向指向车体左侧 z正方向指向车体上方\n"
-                        "xyz单位cm\nrpy单位°\n"
-                        ">>>")
-            try:
-                pose = [float(n) for n in num.split(" ")]
-            except:
-                print("\n输入有误\n")
-                continue
-            if len(pose) != 6:
-                rospy.logerr("目标位姿信息长度不匹配!")
-                continue
-            
-            pose_in_car_base = PoseStamped()
-            pose_in_car_base.header.frame_id = "car_base_link"
-            pose_in_car_base.pose.position.x = pose[0]/100
-            pose_in_car_base.pose.position.y = pose[1]/100
-            pose_in_car_base.pose.position.z = pose[2]/100
-            quaternion = quaternion_from_euler(np.radians(pose[3]), 
-                                               np.radians(pose[4]), 
-                                               np.radians(pose[5]))
-            pose_in_car_base.pose.orientation.x = quaternion[0]
-            pose_in_car_base.pose.orientation.y = quaternion[1]
-            pose_in_car_base.pose.orientation.z = quaternion[2]
-            pose_in_car_base.pose.orientation.w = quaternion[3]
-
-            print("\n末端相对于 car_base_link 的位姿\n[x, y, z, R, P, Y]  cm °\n%.1f %.1f %.1f %.1f %.1f %.1f" % 
-                  (pose[0], pose[1], pose[2], pose[3], pose[4], pose[5]))
-
-            tar_pose_car_pub.publish(pose_in_car_base)
-
-            transform = tf_buffer.lookup_transform(
-                target_frame=f"{arm_ns[1:]}arm_base_link",
-                source_frame="car_base_link",
-                time=rospy.Time(0),
-                timeout=rospy.Duration(1.0)
-            )
-
-            print("Transform from car_base_link to arm_base_link:")
-            print("Translation:", transform.transform.translation)
-            print("Rotation:", transform.transform.rotation)
-
-            pose_in_arm_base = do_transform_pose(pose_in_car_base, transform)
-            
-            quat = [pose_in_arm_base.pose.orientation.x, pose_in_arm_base.pose.orientation.y, 
-                    pose_in_arm_base.pose.orientation.z, pose_in_arm_base.pose.orientation.w]
-            euler_angles = euler_from_quaternion(quat)
-            print("\n末端相对于 arm_base_link 的位姿\n[x, y, z, R, P, Y]  cm °\n%.1f %.1f %.1f %.1f %.1f %.1f" % 
-                  (pose_in_arm_base.pose.position.x*100, pose_in_arm_base.pose.position.y*100, pose_in_arm_base.pose.position.z*100,
-                   np.rad2deg(euler_angles[0]), np.rad2deg(euler_angles[1]), np.rad2deg(euler_angles[2])))
-            arm_target_pose_pub.publish(pose_in_arm_base)
+            s = input("\n输入 x y z r p y: ")
+            pose = list(map(float, s.split()))
+            p = PoseStamped()
+            p.header.frame_id = "car_base_link"
+            p.pose.position.x = pose[0]/100.0
+            p.pose.position.y = pose[1]/100.0
+            p.pose.position.z = pose[2]/100.0
+            q = quaternion_from_euler(np.radians(pose[3]), np.radians(pose[4]), np.radians(pose[5]))
+            p.pose.orientation.x = q[0]
+            p.pose.orientation.y = q[1]
+            p.pose.orientation.z = q[2]
+            p.pose.orientation.w = q[3]
+            tar_pose_car_pub.publish(p)
+            tf = tf_buffer.lookup_transform("%sarm_base_link"%arm_ns[1:], "car_base_link", rospy.Time(0))
+            p2 = do_transform_pose(p, tf)
+            arm_target_pose_pub.publish(p2)
             t0 = time.time()
-            while not get_cmd_ik and (time.time() - t0 < 2):
+            while not get_cmd_ik and time.time()-t0 < 2:
                 pass
             if get_cmd_ik:
-                arm_servo_degree.position = radians_list(arm_ik_servo_degree.position)
+                arm_servo_degree.position = arm_ik_servo_degree.position
                 arm_servo_degree_pub.publish(arm_servo_degree)
                 get_cmd_ik = False
 
+        elif command == "a":
+            print("\nmissiona 手动输入角度")
+            num = input("请输入6个舵机角度: ")
+            try:
+                deg = list(map(int, num.split()))
+                curr_ang=list(map(int, num.split()))
+                
+            except:
+                print("输入错误")
+                continue
+            if len(deg)!=6:
+                print("必须输入6个")
+                continue
+                
+            #curr_ang = deg.copy()
+            #saved_joint_angles = deg[:5]
+                
+            global saved_joint_angles
+            saved_joint_angles = deg[:5]
+            arm_servo_degree.position = radians_list(deg)
+            arm_servo_degree.header.stamp = rospy.Time.now()
+            arm_servo_degree_pub.publish(arm_servo_degree)
+            
+          
+            
+            print("已到达: ", deg)
+            time.sleep(2.5)
+
+        elif command == "b":
+            print("\nmissionb 执行抓取")
+            deg2 = curr_ang[:5] + [50]
+            arm_servo_degree.position = radians_list(deg2)
+            arm_servo_degree.header.stamp = rospy.Time.now()
+            arm_servo_degree_pub.publish(arm_servo_degree)
+            print("已设置: ", deg2)
+            time.sleep(1.5)
+
+            deg3 = [-1, -21, 40, 59, -1, 50]
+            arm_servo_degree.position = radians_list(deg3)
+            arm_servo_degree.header.stamp = rospy.Time.now()
+            arm_servo_degree_pub.publish(arm_servo_degree)
+            print("抬升完成")
+            time.sleep(2)
+            
+            deg4 = [0, 0, 90, 90, 0, 30]
+            arm_servo_degree.position = radians_list(deg4)
+            arm_servo_degree.header.stamp = rospy.Time.now()
+            arm_servo_degree_pub.publish(arm_servo_degree)
+            time.sleep(2)
+            
+        elif command == "c":
+            print("\nmissionc 执行放置")
+            
+            deg3 = [-1, -21, 40, 59, -1, 50]
+            arm_servo_degree.position = radians_list(deg3)
+            arm_servo_degree.header.stamp = rospy.Time.now()
+            arm_servo_degree_pub.publish(arm_servo_degree)
+            print("抬升完成")
+            time.sleep(2)
+            
+            deg4 = [-100,-1,50, 60,-89,50]  
+            arm_servo_degree.position = radians_list(deg4)
+            arm_servo_degree.header.stamp = rospy.Time.now()
+            arm_servo_degree_pub.publish(arm_servo_degree)
+            time.sleep(2)
+            
+            deg4 = [-100,-1,50, 60,-89,130]
+            arm_servo_degree.position = radians_list(deg4)
+            arm_servo_degree.header.stamp = rospy.Time.now()
+            arm_servo_degree_pub.publish(arm_servo_degree)
+            time.sleep(2)
+            
+            deg4 = [0, 0, 90, 90, 0,130]
+            arm_servo_degree.position = radians_list(deg4)
+            arm_servo_degree.header.stamp = rospy.Time.now()
+            arm_servo_degree_pub.publish(arm_servo_degree)
+            time.sleep(2)        
+            
+            
+            
+
+#另粘一份进行修改
+        elif command in ["g1","g2","g3","g4","g5","g6","b1","b2","b3","b4","b5","b6"]:#增加"g6"
+            servo_limit = [[-130,130],[-40,60],[30,120],[30,120],[-90,90],[20,140]]
+            '''curr_ang = []
+            for i in range(6):
+                a = Arm.Arm_serial_servo_read(i+1) - delta_servo[i]
+                curr_ang.append(a)'''
+            
+            idx = int(command[1])-1
+            
+            step = 8 if command[0]=='g' else -8
+
+            # ✅ 只在这里修正 2 号舵机反向
+            if idx == 1:
+                step = -step
+                
+            
+
+            new_ang = curr_ang[idx] + step
+
+            print(f"修改前角度,{curr_ang[0]} {curr_ang[1]} {curr_ang[2]} {curr_ang[3]} {curr_ang[4]} {curr_ang[5]}。目标新角度：{new_ang}")#增加打印看信息
+            mn,mx = servo_limit[idx]
+            
+            if new_ang < mn or new_ang > mx:
+                print("已到达限位")
+                continue
+
+            # ✅ 真实写入舵机（编号完全正确）
+            target = new_ang + delta_servo[idx]
+            Arm.Arm_serial_servo_write(idx+1, target, 300)
+            
+            print(f"本次写入舵机{idx+1},加上漂移的目标值：{target}")#增加打印看信息
+
+            # ✅ 完全保留你原来的 ROS 发布逻辑，一点不改
+            curr_ang[idx] = new_ang
+            arm_servo_degree.position = radians_list(curr_ang)
+            arm_servo_degree.header.stamp = rospy.Time.now()
+            arm_servo_degree_pub.publish(arm_servo_degree)
+
+            
+            
+
+            
+            print("舵机%d 调整%d度 当前%.1f度" % (idx+1, step, curr_ang[idx]))
+            time.sleep(0.6)
+            
+
         elif command == "wf":
-            print("\n当前指令  前转待命\n")
             arm_wait(arm_front, claw_loose, arm_servo_degree, arm_servo_degree_pub)
         elif command == "wm":
-            print("\n当前指令  居中待命\n")
             arm_wait(arm_middle, claw_loose, arm_servo_degree, arm_servo_degree_pub)
         elif command == "wb":
-            print("\n当前指令  后转待命\n")
             arm_wait(arm_back, claw_loose, arm_servo_degree, arm_servo_degree_pub)
 
         elif command == "g":
-            print("\n当前指令  抓取\n")
-
-            num = input("\n请输入目标位置(x y z r p y, 以空格隔开)\n"
-                        "x正方向指向车体前方 y正方向指向车体左侧 z正方向指向车体上方\n"
-                        "xyz单位cm\nrpy单位°\n"
-                        ">>>")
-            try:
-                pose = [float(n) for n in num.split(" ")]
-            except:
-                print("\n输入有误\n")
-                continue
-            if len(pose) != 6:
-                rospy.logerr("目标位姿信息长度不匹配!")
-                continue
-
-            pose_in_car_base = PoseStamped()
-            pose_in_car_base.header.frame_id = "car_base_link"
-            pose_in_car_base.pose.position.x = pose[0]/100
-            pose_in_car_base.pose.position.y = pose[1]/100
-            pose_in_car_base.pose.position.z = pose[2]/100
-            quaternion = quaternion_from_euler(np.radians(pose[3]), 
-                                               np.radians(pose[4]), 
-                                               np.radians(pose[5]))
-            pose_in_car_base.pose.orientation.x = quaternion[0]
-            pose_in_car_base.pose.orientation.y = quaternion[1]
-            pose_in_car_base.pose.orientation.z = quaternion[2]
-            pose_in_car_base.pose.orientation.w = quaternion[3]
-
-            tar_pose_car_pub.publish(pose_in_car_base)
-
-            transform = tf_buffer.lookup_transform(
-                target_frame=f"{arm_ns[1:]}arm_base_link",
-                source_frame="car_base_link",
-                time=rospy.Time(0),
-                timeout=rospy.Duration(1.0)
-            )
-
-            pose_in_arm_base = do_transform_pose(pose_in_car_base, transform)
-            
-            quat = [pose_in_arm_base.pose.orientation.x, pose_in_arm_base.pose.orientation.y, 
-                    pose_in_arm_base.pose.orientation.z, pose_in_arm_base.pose.orientation.w]
-            euler_angles = euler_from_quaternion(quat)
-            print("\n末端相对于 arm_base_link 的位姿\n[x, y, z, R, P, Y]  cm °\n%.1f %.1f %.1f %.1f %.1f %.1f" % 
-                  (pose_in_arm_base.pose.position.x*100, pose_in_arm_base.pose.position.y*100, pose_in_arm_base.pose.position.z*100,
-                   np.rad2deg(euler_angles[0]), np.rad2deg(euler_angles[1]), np.rad2deg(euler_angles[2])))
-            arm_target_pose_pub.publish(pose_in_arm_base)
+            s = input("\n输入抓取坐标 x y z r p y: ")
+            pose = list(map(float, s.split()))
+            p = PoseStamped()
+            p.header.frame_id = "car_base_link"
+            p.pose.position.x = pose[0]/100.0
+            p.pose.position.y = pose[1]/100.0
+            p.pose.position.z = pose[2]/100.0
+            q = quaternion_from_euler(np.radians(pose[3]), np.radians(pose[4]), np.radians(pose[5]))
+            p.pose.orientation.x = q[0]
+            p.pose.orientation.y = q[1]
+            p.pose.orientation.z = q[2]
+            p.pose.orientation.w = q[3]
+            tar_pose_car_pub.publish(p)
+            tfm = tf_buffer.lookup_transform("%sarm_base_link"%arm_ns[1:], "car_base_link", rospy.Time(0))
+            p_arm = do_transform_pose(p, tfm)
+            arm_target_pose_pub.publish(p_arm)
             t0 = time.time()
-            while not get_cmd_ik and (time.time() - t0 < 2):
+            while not get_cmd_ik and time.time()-t0 < 2:
                 pass
             if get_cmd_ik:
-                grab_degree = arm_ik_servo_degree.position
+                grab(arm_ik_servo_degree.position, claw_loose, claw_tight, lr, arm_servo_degree, arm_servo_degree_pub)
                 get_cmd_ik = False
-                grab(grab_degree, claw_loose, claw_tight, lr, arm_servo_degree, arm_servo_degree_pub)
 
         elif command == "p":
-            print("\n当前指令  放置\n")
             put(arm_front, claw_loose, claw_tight, lr, arm_servo_degree, arm_servo_degree_pub)
 
         elif command == "q":
-            print("\n当前指令  退出\n")
-            rospy.logwarn("Press Ctrl + c to exit")
+            print("\n退出程序")
             break
         else:
-            print("\n未知指令, 请重新输入\n")
+            print("\n未知指令")
         
         r.sleep()
         time.sleep(1)
     
-
 if __name__ == '__main__':
     main()
