@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>jzzj_misson</name>
+  <version>0.1.0</version>
+  <description>ROS 1 task framework for AprilTag localization and left-arm visual grasping.</description>
+  <maintainer email="maintainer@example.com">jzzj maintainers</maintainer>
+  <license>TODO</license>
+  <buildtool_depend>catkin</buildtool_depend>
+  <depend>rospy</depend>
+  <depend>std_msgs</depend>
+  <exec_depend>jzzj_visual_servo</exec_depend>
+  <export>
+  </export>
+</package>

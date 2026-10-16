@@ -1,0 +1,15 @@
+<launch>
+  <arg name="target_color" default="" />
+
+  <group ns="jzzj_visual_servo">
+    <rosparam command="load"
+              file="$(find jzzj_visual_servo)/params/visual_servo.yaml" />
+    <param name="jzzj_visual_servo_node/target_color"
+           value="$(arg target_color)" />
+
+    <node pkg="jzzj_visual_servo"
+          type="jzzj_visual_servo_node.py"
+          name="jzzj_visual_servo_node"
+          output="screen" />
+  </group>
+</launch>

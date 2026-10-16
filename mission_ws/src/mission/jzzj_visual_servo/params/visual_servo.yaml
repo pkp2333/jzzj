@@ -1,0 +1,12 @@
+loop_rate: 20.0
+target_color: ""
+horizontal_gain: 0.002
+vertical_gain: 0.002
+depth_gain: 0.25
+horizontal_deadband: 0.03
+vertical_deadband: 0.03
+depth_deadband: 0.05
+max_linear_x: 0.08
+max_linear_z: 0.08
+max_angular_z: 0.25
+require_target_visible: true

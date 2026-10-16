@@ -1,0 +1,21 @@
+auto_start: false
+loop_rate: 10.0
+stage_timeout: 60.0
+target_color: ""
+require_tag_before_motion: true
+require_grasp_confirmation: true
+require_drop_confirmation: false
+
+stages:
+  - WAIT_TAG
+  - LOCALIZE
+  - MOVE_TO_PICK
+  - PICK_ALIGN
+  - SEARCH_OBJECT
+  - VISUAL_APPROACH
+  - GRASP
+  - VERIFY_GRASP
+  - MOVE_TO_DROP
+  - DROP_ALIGN
+  - RELEASE
+  - FINISH
