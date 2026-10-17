@@ -216,3 +216,6 @@ target_link_libraries(arm_ik_node
 
 ## Add folders to be run by python nosetests
 # catkin_add_nosetests(test)
+
+catkin_install_python(PROGRAMS scripts/arm_trajectory_node.py DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+install(FILES scripts/trajectory_safety.py scripts/hardware_lease.py DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})

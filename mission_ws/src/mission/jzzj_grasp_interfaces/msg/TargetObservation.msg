@@ -1,0 +1,10 @@
+std_msgs/Header header
+string session_id
+uint32 track_id
+uint16 class_id
+string label
+string color
+geometry_msgs/Point position
+sensor_msgs/RegionOfInterest roi
+float64 quality
+bool valid

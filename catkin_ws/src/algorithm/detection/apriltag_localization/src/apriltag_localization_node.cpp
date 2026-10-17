@@ -170,6 +170,7 @@ int main(int argc, char **argv) {
                 }
                 putText(frame, std::to_string(det->id), cv::Point(det->c[0],det->c[1]), 3, 0.8, cv::Scalar(255, 0, 255), 1);
                 
+                apriltag_detection_destroy(det);
             }
 
             if (ids.size()) {
@@ -298,13 +299,6 @@ int main(int argc, char **argv) {
                 }
             }
 
-            // The selected detection is still used above; release all detections afterwards.
-            for (int i = 0; i < zarray_size(detections); ++i) {
-                apriltag_detection_t *det;
-                zarray_get(detections, i, &det);
-                apriltag_detection_destroy(det);
-            }
-
             if (visualize) {
                 auto end = std::chrono::system_clock::now();
                 int fps = 1000000 / std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
@@ -312,12 +306,11 @@ int main(int argc, char **argv) {
                             cv::Point(20, cameraHeight-10), 
                             3, 1, cv::Scalar(255, 0, 255), 2);
                 cv::imshow("Apriltag", frame);
+                zarray_destroy(detections);
                 int key = 0;
                 key = cv::waitKey(1) & 0xff;
                 if (key == 27 || key == 'q' || key == 'Q') break;
             }
-
-            zarray_destroy(detections);
 
             tag_det_pub.publish(at_detected);
             sensor_msgs::ImagePtr at_img = cv_bridge::CvImage(hd, "bgr8", frame).toImageMsg();

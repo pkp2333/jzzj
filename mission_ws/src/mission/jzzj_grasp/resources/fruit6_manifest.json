@@ -1,0 +1,232 @@
+{
+  "schema_version": 1,
+  "profile": "fruit6_rknn_152",
+  "purpose": "integration_validation_only",
+  "provenance": {
+    "source_directory_hint": "yolov5-rknn/yolov5_onnx_2_rknn",
+    "inspected_on": "2026-10-17",
+    "method": "read-only ONNX graph metadata, RKNN embedded strings and saved NumPy tensors; no runtime inference",
+    "files": {
+      "yolov5s.rknn": {
+        "sha256": "e3e96bf0e5aa62937319a62859cd2b8038e194c44ad6b731a827edac74192192",
+        "bytes": 9642046
+      },
+      "best.onnx": {
+        "sha256": "a41b74c6ef220b1a472a7b5c9efbd56a811f04daf16bbb73d698465c37331a55",
+        "bytes": 28127158
+      },
+      "RK_anchors.txt": {
+        "sha256": "f55a69db7c60b6238794beaee38269ff864ba94abae6952b42e5e59235693acf",
+        "bytes": 96
+      },
+      "classes.txt": {
+        "sha256": "f63c25c26b16ad67e4bea741e77ce9e3478ec65722d9b06d499998af54b7a1a9",
+        "bytes": 183
+      },
+      "0.jpg": {
+        "sha256": "0abf478eb0ba9537074ac9fcf77fbabc46fa95ae769c25b14f2768e76b78ef8e",
+        "bytes": 131297
+      },
+      "onnx_yolov5_0.npy": {
+        "sha256": "874cfd6365af2ea1dadacb574829f54314bda6d09208396349fa98e359c164a1",
+        "bytes": 844928
+      },
+      "onnx_yolov5_1.npy": {
+        "sha256": "8cf8d21127eafef5cca37d8b885248888a81b1c92349dd7226b3cf760cdf31c4",
+        "bytes": 211328
+      },
+      "onnx_yolov5_2.npy": {
+        "sha256": "ee06c7617f4a62a0b18b6b7d593150fa523ae1a357ab2fbbb144761c93e58667",
+        "bytes": 52928
+      },
+      "test.py": {
+        "sha256": "a5438062629bd704850f51f8da10cc8cc8bbfe1093204122e5826e6ba776b5cb",
+        "bytes": 9211
+      }
+    }
+  },
+  "model": {
+    "file": "yolov5s.rknn",
+    "sha256": "e3e96bf0e5aa62937319a62859cd2b8038e194c44ad6b731a827edac74192192",
+    "target_platform": "rk3588",
+    "toolkit_version": "1.5.2+b642f30c",
+    "compiler_version": "1.5.2 (c6b7b351a@2023-08-23T15:34:44)",
+    "repository_runtime_version": "1.5.2 (c6b7b351a@2023-08-23T15:28:22)",
+    "runtime_compatibility": "NOT_VALIDATED_ON_DEVICE",
+    "input": {
+      "name": "images",
+      "shape": [
+        1,
+        3,
+        640,
+        640
+      ],
+      "logical_layout": "NCHW",
+      "application_dtype": "UINT8",
+      "application_layout": "NHWC"
+    },
+    "outputs": [
+      {
+        "name": "output0",
+        "shape": [
+          1,
+          33,
+          80,
+          80
+        ],
+        "device_dtype": "INT8",
+        "device_layout": "NCHW",
+        "quantization": "affine_asymmetric"
+      },
+      {
+        "name": "340",
+        "shape": [
+          1,
+          33,
+          40,
+          40
+        ],
+        "device_dtype": "INT8",
+        "device_layout": "NCHW",
+        "quantization": "affine_asymmetric"
+      },
+      {
+        "name": "342",
+        "shape": [
+          1,
+          33,
+          20,
+          20
+        ],
+        "device_dtype": "INT8",
+        "device_layout": "NCHW",
+        "quantization": "affine_asymmetric"
+      }
+    ]
+  },
+  "labels": {
+    "class_num": 6,
+    "names": [
+      "fruit-1",
+      "fruit-2",
+      "fruit-3",
+      "fruit-4",
+      "fruit-5",
+      "fruit-6"
+    ],
+    "file": "fruit6_labels.txt",
+    "sha256": "7148ee79d64beb71b94d0c7c41bd13c4e82c092539b47e093f37198329b1a495",
+    "semantic_status": "UNCONFIRMED: neutral names from best.onnx metadata, not ripeness/species claims",
+    "conflicts": [
+      "classes.txt contains 14 names for a six-class model",
+      "test.py CLASSES and dataset class files disagree with other material and saved prediction semantics",
+      "legacy ROS fruit class ordering is not a verified mapping for this artifact"
+    ]
+  },
+  "preprocessing": {
+    "color": "BGR_to_RGB",
+    "resize": "stretch",
+    "input_width": 640,
+    "input_height": 640,
+    "application_divide_by_255": false,
+    "embedded_mean": [
+      0,
+      0,
+      0
+    ],
+    "embedded_std": [
+      255,
+      255,
+      255
+    ]
+  },
+  "anchors": [
+    10.0,
+    13.0,
+    16.0,
+    30.0,
+    33.0,
+    23.0,
+    30.0,
+    61.0,
+    62.0,
+    45.0,
+    59.0,
+    119.0,
+    116.0,
+    90.0,
+    156.0,
+    198.0,
+    373.0,
+    326.0
+  ],
+  "strides": [
+    8,
+    16,
+    32
+  ],
+  "conf_thresh": 0.25,
+  "iou_thresh": 0.45,
+  "offline_reference": {
+    "source": "saved tensors only, NOT fresh ONNX/RKNN inference",
+    "image_file": "0.jpg",
+    "source_image_size_wh": [
+      640,
+      480
+    ],
+    "classes": [
+      0,
+      1,
+      2,
+      3,
+      3,
+      4
+    ],
+    "scores": [
+      0.7511,
+      0.7817,
+      0.6685,
+      0.8945,
+      0.5981,
+      0.8734
+    ],
+    "boxes_model_xyxy": [
+      [
+        136.9,
+        141.7,
+        195.1,
+        220.1
+      ],
+      [
+        17.2,
+        134.8,
+        78.4,
+        216.4
+      ],
+      [
+        13.6,
+        437.0,
+        96.6,
+        517.7
+      ],
+      [
+        143.7,
+        440.8,
+        217.6,
+        524.5
+      ],
+      [
+        138.2,
+        293.7,
+        208.9,
+        373.4
+      ],
+      [
+        24.6,
+        290.8,
+        90.5,
+        362.8
+      ]
+    ]
+  }
+}

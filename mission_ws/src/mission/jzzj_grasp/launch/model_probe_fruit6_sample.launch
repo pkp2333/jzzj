@@ -1,0 +1,13 @@
+<launch>
+  <arg name="model_dir"/>
+  <!-- Separate topics/frame from the actual hp60c stream; no sample can become a real RGB-D observation. -->
+  <include file="$(find jzzj_grasp)/launch/model_probe_fruit6.launch">
+    <arg name="model_dir" value="$(arg model_dir)"/>
+    <arg name="start_camera" value="false"/>
+    <arg name="enable_rgbd_observer" value="false"/>
+    <arg name="rgb_topic" value="/stage_c/model_probe/sample_rgb"/>
+    <arg name="detections_topic" value="/stage_c/model_probe/sample_detections"/>
+  </include>
+  <node pkg="jzzj_grasp" type="publish_fruit6_sample.py" name="fruit6_sample" output="screen"
+    args="--model-dir &quot;$(arg model_dir)&quot; --manifest &quot;$(find jzzj_grasp)/resources/fruit6_manifest.json&quot;"/>
+</launch>
