@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+ 
+<launch>
+
+    <arg name="chip_type" default="$(env CHIP_TYPE)" />
+    <arg name="cam_type" default="ascamera" />
+    <arg name="open_camera" default="true" />
+    <arg name="yolo_visualize" default="true" />
+
+    <rosparam command="load" file="$(find yolov5_rknn)/params/yolov5_rc_$(arg chip_type)_$(arg cam_type).yaml" />
+    
+    <group if="$(arg open_camera)"> 
+        <include file="$(find ascamera)/launch/hp60c.launch" />
+    </group>
+    
+    <group ns="yolov5_rknn_rc">
+        <param name="visualize" value="$(arg yolo_visualize)" />
+        <node pkg="yolov5_rknn" type="yolov5_rknn_stream" name="yolov5_rknn_stream" output="screen" />
+    </group>
+
+</launch>

@@ -1,0 +1,10 @@
+<?xml version="1.0"?>
+
+<launch>
+    
+    <rosparam command="load" file="$(find deepseek)/params/deepseek_config.yaml" />
+    
+    <node pkg="deepseek" type="deepseek_node" name="deepseek_node" output="screen" />
+
+</launch>
+

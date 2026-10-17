@@ -1,0 +1,12 @@
+# ROS / catkin build artifacts
+build/
+devel/
+install/
+log/
+
+# Python
+__pycache__/
+*.py[cod]
+
+# Claude Code local settings
+.claude/

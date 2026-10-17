@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+
+<launch>
+    
+    <arg name="visualize" default="true" />
+    
+    <rosparam command="load" file="$(find mission_manage)/params/mission_params.yaml" />
+
+    <include file="$(find deepseek)/launch/deepseek.launch" />
+    
+
+    <node pkg="mission_manage" type="mission_manage_test_node.py" name="mission_manage_test" output="screen" />    
+
+</launch>

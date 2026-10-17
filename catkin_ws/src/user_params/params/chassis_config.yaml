@@ -1,0 +1,21 @@
+chassis:  # 底盘相关参数
+    serial_port:      /dev/ttyS0  # 串口设备号
+    serial_baudrate:  115200  # 串口波特率
+
+    l_0x40:           0.45  # 线速度系数校准 1s内行驶的距离 m
+    a_0x40:           33.0  # 角速度系数校准 1s内旋转的角度 °
+
+    dead_zone_xy:     0.00  # 平移方向控制量小于该值则不执行 (可置零)
+    activate_zone_xy: 0.06  # 平移方向死区阈值 车子刚动起来的值
+    dead_zone_z:      0.00  # 自旋方向控制量小于该值则不执行 (可置零)
+    activate_zone_z:  11.0  # 自旋方向死区阈值 车子刚动起来的值
+
+    max_vel_linear:   0.5   # m/s
+    max_vel_angular:  60    # °/s 
+
+    key_control:  # 键盘遥控
+        step_size_linear:   0.01  # m/s
+        step_size_angular:  1    # °/s
+        
+
+

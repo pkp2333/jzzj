@@ -1,0 +1,42 @@
+auto_start: false
+loop_rate: 10.0
+stage_timeout: 60.0
+target_color: ""
+require_tag_before_motion: true
+require_grasp_confirmation: true
+require_drop_confirmation: false
+
+# Fill [x(m), y(m), yaw(rad)] with the calibrated field coordinates.
+pick_pose: null
+drop_pose: null
+drop_align_pose: null
+pose_timeout: 0.8
+require_both_tags: false
+position_tolerance: 0.06
+yaw_tolerance_deg: 6.0
+kp_position: 0.9
+kp_yaw: 1.5
+max_linear: 0.35
+max_angular: 0.8
+release_settle_time: 2.0
+release_pose_deg: [0.0, 0.0, 90.0, 90.0, 0.0, 60.0]
+grasp_pre_pose_deg: [-60.0, 35.0, 90.0, 40.0, -70.0, 60.0]
+grasp_close_pose_deg: [-60.0, 35.0, 90.0, 40.0, -70.0, 30.0]
+grasp_lift_pose_deg: [0.0, 0.0, 70.0, 0.0, 0.0, 30.0]
+grasp_pre_settle_time: 1.0
+grasp_close_settle_time: 2.0
+assume_grasp_success_after_sequence: false
+
+stages:
+  - WAIT_TAG
+  - LOCALIZE
+  - MOVE_TO_PICK
+  - PICK_ALIGN
+  - SEARCH_OBJECT
+  - VISUAL_APPROACH
+  - GRASP
+  - VERIFY_GRASP
+  - MOVE_TO_DROP
+  - DROP_ALIGN
+  - RELEASE
+  - FINISH

@@ -1,0 +1,11 @@
+rplidar:
+    serial_port:      /dev/rplidar
+    serial_baudrate:  460800
+
+    frame_id:         laser
+
+    inverted:         false
+    angle_compensate: true
+
+    scan_frequency:   10.0
+    scan_mode:        Standard

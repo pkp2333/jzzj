@@ -1,0 +1,9 @@
+<launch>
+  <arg name="target_color" default="" />
+  <arg name="enable_visual_servo" default="true" />
+  <include file="$(find jzzj_misson)/launch/jzzj_misson.launch">
+    <arg name="auto_start" value="true" />
+    <arg name="target_color" value="$(arg target_color)" />
+    <arg name="enable_visual_servo" value="$(arg enable_visual_servo)" />
+  </include>
+</launch>

@@ -1,0 +1,21 @@
+apriltag_localization:
+  image_topic_name: /ascamera_hp60c/rgb0/image  # sub
+  detected_topic_name: /apriltag_detected
+  pose_topic_name: /cam_pose_tag                # pub
+
+  tag_size: 0.133  # m
+  id_list: [ 0,  1,  2,  3,  4,  5,  6,  7,  8,  9,
+            10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 
+            20, 21, 22, 23, 24, 25, 26]
+
+  resolve_method: 0
+  # enum { SOLVEPNP_ITERATIVE = 0,
+  #        SOLVEPNP_EPNP      = 1, //!< EPnP: Efficient Perspective-n-Point Camera Pose Estimation @cite lepetit2009epnp
+  #        SOLVEPNP_P3P       = 2, //!< Complete Solution Classification for the Perspective-Three-Point Problem 
+  #        SOLVEPNP_DLS       = 3, //!< A Direct Least-Squares (DLS) Method for PnP  @cite hesch2011direct
+  #        SOLVEPNP_UPNP      = 4, //!< Exhaustive Linearization for Robust Camera Pose and Focal Length Estimation 
+  #        SOLVEPNP_AP3P      = 5, //!< An Efficient Algebraic Solution to the Perspective-Three-Point Problem 
+  #        SOLVEPNP_MAX_COUNT      //!< Used for count
+  #      };
+
+  pub_tf: false

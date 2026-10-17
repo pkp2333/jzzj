@@ -1,0 +1,20 @@
+usb_cam:
+    # v4l2-ctl --info -d /dev/video0 --list-formats-ext
+    # brightness -64~(0)~64
+    # contrast 0~(4)~95
+    # hue -2000~(0)~2000
+    # Saturation 0~(90)~255
+    # gamma 0~(100)~300
+    # withebalance 2800~(4820)~6500
+    # backlight 24~(100)~160
+    video_port: 0
+    pixel_format: yuyv  # yuyv / mjpeg
+    fps: 30
+    exposure: 0  # 1~10000      0 to auto-exposure
+    width: 640
+    height: 480
+    pub_rate: 30
+
+    camera_info_path: file:///home/orangepi/.ros/camera_info/
+
+    kill_switch_topic: /task

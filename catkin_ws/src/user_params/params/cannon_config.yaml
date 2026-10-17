@@ -1,0 +1,8 @@
+cannon:
+    serial_port:          /dev/ttyS6
+    serial_baudrate:      115200
+    irradiation_time:     0.8
+    # 以下参数 须手动调节相机球方向 确保激光光路与相机光轴平行
+    x_cannon_to_cam:      0
+    z_cannon_to_cam:      3.5
+    a_cannon_to_cam:      0
