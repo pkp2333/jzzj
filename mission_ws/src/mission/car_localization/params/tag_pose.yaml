@@ -2,16 +2,18 @@ car_localization:
   tag_pose:
     # Format: [x, y, z, roll, pitch, yaw], metres and degrees.
     # Map origin is the lower-left corner; x points right and y points up.
+    # Upright tags: local +x points into the mounting surface, +z points up.
+    # yaw is the heading of local +x, opposite to the visible front face.
     id_list: [1, 2, 3, 4, 5]
 
     # Start tag, heading upper-left at 45 degrees.
-    tag_1: [3.200, 0.000, 0.150, 0.0, 0.0, 135.0]
+    tag_1: [3.200, 0.000, 0.150, 0.0, 0.0, -45.0]
 
     # Tables are right to left as IDs 2, 3, 4.
     # y=2.50 assumes 0.30 m table depth from the y=2.80 boundary.
-    tag_2: [2.400, 2.500, 0.1275, 0.0, 0.0, -90.0]
-    tag_3: [1.600, 2.500, 0.1275, 0.0, 0.0, -90.0]
-    tag_4: [0.800, 2.500, 0.1275, 0.0, 0.0, -90.0]
+    tag_2: [2.400, 2.500, 0.1275, 0.0, 0.0, 90.0]
+    tag_3: [1.600, 2.500, 0.1275, 0.0, 0.0, 90.0]
+    tag_4: [0.800, 2.500, 0.1275, 0.0, 0.0, 90.0]
 
     # Drop box, 0.16 m deep from the left boundary; tag faces right.
-    tag_5: [0.160, 1.400, 0.065, 0.0, 0.0, 0.0]
+    tag_5: [0.160, 1.400, 0.065, 0.0, 0.0, 180.0]
