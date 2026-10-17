@@ -1,7 +1,0 @@
-<launch>
-  <arg name="session_id" default="stage-c-demo"/>
-  <include file="$(find jzzj_grasp)/launch/stage_c.launch"><arg name="backend" value="sim"/></include>
-  <node pkg="jzzj_grasp" type="sim_context.py" name="sim_stage_c_context" output="screen">
-    <param name="session_id" value="$(arg session_id)"/>
-  </node>
-</launch>

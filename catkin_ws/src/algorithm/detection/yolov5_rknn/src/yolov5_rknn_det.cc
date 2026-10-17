@@ -20,13 +20,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <chrono>
-#include <cmath>
-#include <cstdint>
-#include <mutex>
-#include <sstream>
-#include <set>
-#include <algorithm>
-#include <stdexcept>
 
 #include <ros/ros.h>
 #include <std_msgs/Bool.h>
@@ -51,7 +44,6 @@ bool task = true;
 std::mutex frame_mutex;
 cv::Mat frame_sub;
 std_msgs::Header hd;
-uint64_t frame_generation = 0;
 
 
 void task_cb(const std_msgs::Bool::ConstPtr& msg) {
@@ -64,15 +56,10 @@ void task_cb(const std_msgs::Bool::ConstPtr& msg) {
 void image_raw_cb(const sensor_msgs::Image::ConstPtr& msg) {
     
     cv::Mat msg2frame = cv_bridge::toCvShare(msg, "bgr8")->image;
-    if (msg->header.stamp.isZero()) {
-        ROS_WARN_THROTTLE(2., "Ignoring unstamped camera frame");
-        return;
-    }
-    std::lock_guard<std::mutex> lock(frame_mutex);
-    if (!hd.stamp.isZero() && msg->header.stamp <= hd.stamp) return;
     hd = msg->header;
+    frame_mutex.lock();
     frame_sub = msg2frame.clone();
-    ++frame_generation;
+    frame_mutex.unlock();
 
 }
 
@@ -80,12 +67,11 @@ void image_raw_cb(const sensor_msgs::Image::ConstPtr& msg) {
 void pub_dets(const ros::Publisher& publisher, 
               detect_result_group_t& dets, 
               int& fps,
-              std::unordered_map<int, std::string>& labels_map,
-              const std_msgs::Header& frame_header) {
+              std::unordered_map<int, std::string>& labels_map) {
 
     user_msgs::ObjDets Dets;
     
-    Dets.header = frame_header;
+    Dets.header = hd;
     Dets.fps = fps;
     Dets.num = dets.count;
     
@@ -114,12 +100,11 @@ void pub_dets(const ros::Publisher& publisher,
 void pub_sorted_dets(const ros::Publisher& publisher,
                      std::vector<STrack>& output_stracks,
                      int& fps,
-                     std::unordered_map<int, std::string>& labels_map,
-              const std_msgs::Header& frame_header) {
+                     std::unordered_map<int, std::string>& labels_map) {
 
     user_msgs::ObjDets Dets;
     
-    Dets.header = frame_header;
+    Dets.header = hd;
     Dets.fps = fps;
     Dets.num = output_stracks.size();
 
@@ -196,9 +181,9 @@ int main(int argc, char** argv)
 
     // Get engine name
     last_slash_pos = model_url.find_last_of('/');
-    std::string model_file_name = model_url.substr(last_slash_pos==std::string::npos ? 0 : last_slash_pos+1);
+    std::string model_file_name = model_url.substr(last_slash_pos, model_url.size());
     size_t first_dot_pos = model_file_name.find_first_of('.');
-    std::string model_name = model_file_name.substr(0, first_dot_pos);
+    std::string model_name = model_file_name.substr(1, first_dot_pos - 1);
 
     // Read the txt file for classnames
     std::ifstream labels_file(labels_url, std::ios::binary);
@@ -207,27 +192,9 @@ int main(int argc, char** argv)
         return -1;
     }
     std::unordered_map<int, std::string> labels_map;
-    // Validate labels without assert (which disappears in release builds).
-    std::string label_line;
-    if (!std::getline(labels_file, label_line)) { ROS_ERROR("Empty labels file"); return -1; }
-    try {
-        if (std::stoi(label_line) != class_num || class_num <= 0 || class_num > 256)
-            throw std::runtime_error("class count mismatch");
-        int index=0;
-        while(std::getline(labels_file,label_line)) {
-            label_line=trim_leading_whitespace(label_line);
-            while(!label_line.empty() && (label_line.back()=='\r' || label_line.back()==' ')) label_line.pop_back();
-            if(label_line.empty()) throw std::runtime_error("empty label");
-            labels_map[index++]=label_line;
-        }
-        if(index!=class_num) throw std::runtime_error("label line count mismatch");
-        std::set<std::string> unique;
-        for(const auto& x:labels_map) unique.insert(x.second);
-        if(unique.size()!=labels_map.size()) throw std::runtime_error("duplicate labels");
-    } catch(const std::exception& e) { ROS_ERROR("Invalid labels: %s", e.what()); return -1; }
-    if (anchors.size()!=18 || std::any_of(anchors.begin(), anchors.end(), [](float a){return !std::isfinite(a)||a<=0;})) {
-        ROS_ERROR("Expected 18 finite positive anchors"); return -1;
-    }
+    read_labels(labels_url, labels_map, class_num);
+
+    assert(anchors.size() == 18);
     const float anchor0[6] = {anchors[0], anchors[1], anchors[2], anchors[3], anchors[4], anchors[5]};
     const float anchor1[6] = {anchors[6], anchors[7], anchors[8], anchors[9], anchors[10], anchors[11]};
     const float anchor2[6] = {anchors[12], anchors[13], anchors[14], anchors[15], anchors[16], anchors[17]};
@@ -255,7 +222,6 @@ int main(int argc, char** argv)
 
     int            model_data_size = 0;
     unsigned char* model_data      = load_model(model_url, &model_data_size);
-    if(model_data==nullptr || model_data_size<=0) { ROS_ERROR("Model missing or empty"); return -1; }
     ret                            = rknn_init(&ctx, model_data, model_data_size, 0, NULL);
     
     if (ret < 0) {
@@ -278,10 +244,6 @@ int main(int argc, char** argv)
         return -1;
     }
     printf("model input num: %d, output num: %d\n", io_num.n_input, io_num.n_output);
-    if(io_num.n_input!=1 || io_num.n_output!=3) {
-        ROS_ERROR("Only one RGB input and three quantized YOLOv5 heads are supported");
-        rknn_destroy(ctx); return -1;
-    }
 
     rknn_tensor_attr input_attrs[io_num.n_input];
     memset(input_attrs, 0, sizeof(input_attrs));
@@ -300,31 +262,9 @@ int main(int argc, char** argv)
     for (int i = 0; i < io_num.n_output; i++) {
         output_attrs[i].index = i;
         ret                   = rknn_query(ctx, RKNN_QUERY_OUTPUT_ATTR, &(output_attrs[i]), sizeof(rknn_tensor_attr));
-        if(ret<0) { ROS_ERROR("Cannot query output tensor"); rknn_destroy(ctx); return -1; }
+        // dump_tensor_attr(&(output_attrs[i]));
     }
 
-    // Emit the actual Runtime-reported ABI, not just assumptions from offline metadata.
-    auto log_tensor = [](const char* kind, const rknn_tensor_attr& a) {
-        std::ostringstream dimensions;
-        for(unsigned d=0; d<a.n_dims && d<RKNN_MAX_DIMS; ++d) {
-            if(d) dimensions << "x";
-            dimensions << a.dims[d];
-        }
-        ROS_INFO("%s[%u] name=%s shape=%s layout=%s dtype=%s quant=%s zp=%d scale=%.10g bytes=%u",
-            kind,a.index,a.name,dimensions.str().c_str(),get_format_string(a.fmt),
-            get_type_string(a.type),get_qnt_type_string(a.qnt_type),a.zp,a.scale,a.size);
-    };
-    for(unsigned i=0;i<io_num.n_input;i++) log_tensor("input",input_attrs[i]);
-    for(unsigned i=0;i<io_num.n_output;i++) log_tensor("output",output_attrs[i]);
-    ROS_INFO("preprocess=BGR_to_RGB direct_resize uint8_NHWC; normalization is embedded in RKNN (no extra /255)");
-    ROS_INFO("config classes=%d confidence=%.6f nms=%.6f anchors=%zu model=%s labels=%s",
-        class_num,ConfThresh,NmsThresh,anchors.size(),model_url.c_str(),labels_url.c_str());
-    for(const auto& label:labels_map) ROS_INFO("label[%d]=%s",label.first,label.second.c_str());
-    std::ostringstream anchor_text;
-    for(float anchor:anchors) anchor_text << anchor << " ";
-    ROS_INFO("anchors: %s",anchor_text.str().c_str());
-
-    if(input_attrs[0].n_dims!=4) { ROS_ERROR("Expected rank-4 input"); rknn_destroy(ctx); return -1; }
     int channel = 3;
     int width   = 0;
     int height  = 0;
@@ -341,24 +281,6 @@ int main(int argc, char** argv)
     }
 
     printf("model input height=%d, width=%d, channel=%d\n", height, width, channel);
-    if(channel!=3 || height<=0 || width<=0 || height%32 || width%32) {
-        ROS_ERROR("Unsupported input channels/size"); rknn_destroy(ctx); return -1;
-    }
-    int expected_width,expected_height;
-    nh.param("expected_input_width",expected_width,0);nh.param("expected_input_height",expected_height,0);
-    if((expected_width>0 && width!=expected_width)||(expected_height>0 && height!=expected_height)) {
-        ROS_ERROR("Model input size differs from configured expected size"); rknn_destroy(ctx); return -1;
-    }
-    for(unsigned i=0;i<3;i++) {
-        const auto& a=output_attrs[i]; const unsigned stride=8u<<i;
-        if(a.n_dims!=4 || a.fmt!=RKNN_TENSOR_NCHW || a.type!=RKNN_TENSOR_INT8 ||
-           a.qnt_type!=RKNN_TENSOR_QNT_AFFINE_ASYMMETRIC || !std::isfinite(a.scale) || a.scale<=0 ||
-           a.dims[0]!=1 || a.dims[1]!=3u*(class_num+5) ||
-           a.dims[2]!=static_cast<unsigned>(height)/stride || a.dims[3]!=static_cast<unsigned>(width)/stride) {
-            ROS_ERROR("Unsupported head %u: expected NCHW INT8 affine YOLOv5 outputs in stride 8/16/32 order",i);
-            rknn_destroy(ctx); return -1;
-        }
-    }
 
     rknn_input inputs[1];
     memset(inputs, 0, sizeof(inputs));
@@ -399,26 +321,16 @@ int main(int argc, char** argv)
                     "\n\33[34m#################################\033[1m\33[35m Settings \033[0m\33[34m#################################\n");
 
 
-    double max_frame_age;
-    nh.param("max_frame_age",max_frame_age,0.5);
-    if(!std::isfinite(max_frame_age)||max_frame_age<=0) { rknn_destroy(ctx); return -1; }
-    uint64_t processed_generation=0;
-    bool inference_failed=false;
     ros::Rate r(30);
     
     while (ros::ok() and task) {
-        ros::spinOnce();
-        cv::Mat frame;
-        std_msgs::Header inference_header;
-        {
-            std::lock_guard<std::mutex> lock(frame_mutex);
-            if(frame_generation!=processed_generation && !frame_sub.empty()) {
-                frame=frame_sub.clone(); inference_header=hd;
-                processed_generation=frame_generation;
-            }
-        }
-        if (!frame.empty() && (ros::Time::now()-inference_header.stamp).toSec()<=max_frame_age &&
-                (ros::Time::now()-inference_header.stamp).toSec()>=-0.05) {
+        if (!frame_sub.empty()) {
+            
+            cv::Mat frame;
+
+            frame_mutex.lock();
+            frame = frame_sub.clone();
+            frame_mutex.unlock();
 
             auto start = std::chrono::system_clock::now();
     
@@ -443,7 +355,7 @@ int main(int argc, char** argv)
                 memset(&dst, 0, sizeof(dst));
                 ret = resize_rga(src, dst, img, resized_img, target_size);
                 if (ret != 0) {
-                    ROS_ERROR("resize with RGA failed"); inference_failed=true; break;
+                    fprintf(stderr, "resize with rga error\n");
                 }
                 inputs[0].buf = resized_img.data;
 
@@ -465,9 +377,7 @@ int main(int argc, char** argv)
                 inputs[0].buf = (void*)img.data;
             }
 
-            if(rknn_inputs_set(ctx, io_num.n_input, inputs)<0) {
-                ROS_ERROR("RKNN input failed"); inference_failed=true; break;
-            }
+            rknn_inputs_set(ctx, io_num.n_input, inputs);
 
             rknn_output outputs[io_num.n_output];
             memset(outputs, 0, sizeof(outputs));
@@ -476,39 +386,32 @@ int main(int argc, char** argv)
             }
 
             ret = rknn_run(ctx, NULL);
-            if(ret<0) { ROS_ERROR("RKNN run failed"); inference_failed=true; break; }
             ret = rknn_outputs_get(ctx, io_num.n_output, outputs, NULL);
-            if(ret<0) { ROS_ERROR("RKNN output failed"); inference_failed=true; break; }
             // gettimeofday(&stop_time, NULL);
             // printf("once run use %f ms\n", (__get_us(stop_time) - __get_us(start_time)) / 1000);
 
             // post process
-            detect_result_group_t detect_result_group = {};
+            detect_result_group_t detect_result_group;
             std::vector<float>    out_scales;
             std::vector<int32_t>  out_zps;
             for (int i = 0; i < io_num.n_output; ++i) {
                 out_scales.push_back(output_attrs[i].scale);
                 out_zps.push_back(output_attrs[i].zp);
             }
-            ret = post_process(class_num,
+            post_process(class_num,
                          (int8_t*)outputs[0].buf, (int8_t*)outputs[1].buf, (int8_t*)outputs[2].buf, 
                          height, width,
                          (float*)anchor0, (float*)anchor1, (float*)anchor2,
                          ConfThresh, NmsThresh, 
                          scale_w, scale_h, out_zps, out_scales, &detect_result_group);
 
-            if(ret<0) {
-                ROS_ERROR("YOLO postprocess failed"); rknn_outputs_release(ctx, io_num.n_output, outputs); inference_failed=true; break;
-            }
             std::vector<STrack> output_stracks = bytetracker.update(detect_result_group, 0);
 
             auto end = std::chrono::system_clock::now();
             int fps = 1000000 / std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
 
-            // Source header belongs to this immutable inference snapshot.
-            // An empty fresh detector frame clears stale observations immediately.
-            if(detect_result_group.count==0) output_stracks.clear();
-            pub_sorted_dets(detection_pub, output_stracks, fps, labels_map, inference_header);
+            // pub_dets(detection_pub, detect_result_group, fps, labels_map);
+            pub_sorted_dets(detection_pub, output_stracks, fps, labels_map);
 
             if (visualize) {
                 // draw_bbox(frame, detect_result_group, labels_map);
@@ -524,9 +427,7 @@ int main(int argc, char** argv)
             
             int key = 0;
             key = cv::waitKey(1) & 0xff;
-            if (key == 27 || key == 'q' || key == 'Q') {
-                rknn_outputs_release(ctx, io_num.n_output, outputs); break;
-            }
+            if (key == 27 || key == 'q' || key == 'Q') break;
             
             ret = rknn_outputs_release(ctx, io_num.n_output, outputs);
 
@@ -552,5 +453,5 @@ int main(int argc, char** argv)
 
     ROS_WARN("\33[32mYolov5_rknn_det Node Node Terminated\33[0m");
 
-    return inference_failed ? 1 : 0;
+    return 0;
 }

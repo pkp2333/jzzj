@@ -3,7 +3,8 @@
 
   <group ns="jzzj_visual_servo">
     <rosparam command="load"
-              file="$(find jzzj_visual_servo)/params/visual_servo.yaml" ns="jzzj_visual_servo_node" />
+              file="$(find jzzj_visual_servo)/params/visual_servo.yaml"
+              ns="jzzj_visual_servo_node" />
     <param name="jzzj_visual_servo_node/target_color"
            value="$(arg target_color)" />
 

@@ -22,7 +22,7 @@ AprilTag is used for vehicle pose and point-to-point correction. Since the field
 - jzzj_misson/motion_command: std_msgs/String
 - jzzj_misson/left_arm_command: std_msgs/String
 
-The command topics are framework placeholders. They must be connected to the real chassis and left-arm interfaces after the existing message types and topic names are confirmed.
+The task node now publishes `/cmd_vel` and `/car_cmd` for point-to-point motion, and sends calibrated left-arm `JointState` poses for prepare, close, lift, and release. The external confirmation topics remain available for reliable grasp and drop verification.
 
 The visual-servo package is a separate package named jzzj_visual_servo. The task package can launch it with enable_visual_servo:=true. It receives the visual package grasp_ready result through a launch remap and sends it an enable signal during PICK_ALIGN, SEARCH_OBJECT, and VISUAL_APPROACH.
 
@@ -49,10 +49,4 @@ Use advance only while testing a stage manually. Real integration should let the
 5. Publish grasp_confirmed from the gripper or a verified vision result.
 6. Connect the drop-box alignment and release confirmation.
 
-This is a framework, not a completed hardware implementation. It must be tested on the robot with an emergency stop available.
-
-## 可选独立阶段 C（2026-10-17）
-
-`external_stage_c:=true stage_c_session_id:=<上游会话>` 启用阶段 C Action 客户端；需另外启动 jzzj_grasp 和真实交接心跳。抓取阶段不再接受人工 advance/旧 Bool 推进，仅当前 Action 的完整成功结果才进入 MOVE_TO_DROP。stop/超时会取消并继续等待停稳确认；A/B/D/E 算法不变。
-
-接口、模拟、模型/标定和未验收项见[阶段 C 接入说明](../jzzj_grasp/README.md)。原文档下面提到的包级话题是历史意图，旧源码实际使用节点私有话题，例如 `/jzzj_misson/jzzj_misson_node/start`；不要省略节点名。新 C 使用 Action，不依赖这些占位字符串执行硬件。
+Set `pick_pose` and `drop_pose` in `params/mission.yaml` before running. The task node stops and enters `FAULT` if a target pose or localization is unavailable. Test on the robot with an emergency stop available.

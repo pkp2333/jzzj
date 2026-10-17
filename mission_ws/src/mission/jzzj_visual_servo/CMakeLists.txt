@@ -1,8 +1,23 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(jzzj_visual_servo)
-find_package(catkin REQUIRED COMPONENTS rospy cv_bridge sensor_msgs geometry_msgs std_msgs tf2_ros user_msgs jzzj_grasp_interfaces)
-catkin_python_setup()
-catkin_package(CATKIN_DEPENDS jzzj_grasp_interfaces)
-catkin_install_python(PROGRAMS scripts/jzzj_visual_servo_node.py scripts/stage_c_observer.py DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
-install(DIRECTORY launch params DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
-install(FILES README.md DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
+
+find_package(catkin REQUIRED COMPONENTS
+  geometry_msgs
+  rospy
+  std_msgs
+)
+
+catkin_package()
+
+catkin_install_python(PROGRAMS
+  scripts/jzzj_visual_servo_node.py
+  DESTINATION \${CATKIN_PACKAGE_BIN_DESTINATION}
+)
+
+install(DIRECTORY launch params
+  DESTINATION \${CATKIN_PACKAGE_SHARE_DESTINATION}
+)
+
+install(FILES README.md
+  DESTINATION \${CATKIN_PACKAGE_SHARE_DESTINATION}
+)

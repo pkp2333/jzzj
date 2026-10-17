@@ -1,8 +1,0 @@
-bool forward_only
-geometry_msgs/PoseStamped tcp_target
-sensor_msgs/JointState seed
----
-bool valid
-sensor_msgs/JointState solution
-geometry_msgs/PoseStamped tcp_pose
-string reason

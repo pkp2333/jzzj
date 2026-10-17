@@ -1,71 +1,12 @@
-# ROS / catkin generated files
-**/build/
-**/devel/
-**/install/
-**/log/
-**/logs/
-**/.catkin_tools/
-.ros/
+# ROS / catkin build artifacts
+build/
+devel/
+install/
+log/
 
-# Python generated files
-**/__pycache__/
+# Python
+__pycache__/
 *.py[cod]
-*.pyd
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
 
-# Editors and operating systems
-.idea/
-.vscode/
-*.code-workspace
-*.log
-*.lock
-.DS_Store
-Thumbs.db
-
-# Native build products
-*.o
-*.obj
-*.d
-*.dep
-*.elf
-*.axf
-*.map
-*.lst
-*.hex
-*.bin
-*.srec
-*.su
-*.gcda
-*.gcno
-*.gcov
-.sconsign.dblite
-
-# Keil / IAR user-specific files
-*.uvguix.*
-*.uvopt
-*.uvoptx
-*.ewd
-*.dep
-
-# Archives and temporary backups
-*.zip
-*.7z
-*.rar
-*.tar
-*.tar.gz
-*.bak
-*.tmp
-*~
-
-# Runtime data and external model weights
-*.bag
-*.bag.active
-*.rknn
-*.rkllm
-*.onnx
-*.pt
-*.pth
-*.engine
-
+# Claude Code local settings
+.claude/

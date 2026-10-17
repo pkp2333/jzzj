@@ -1,8 +1,0 @@
-cmake_minimum_required(VERSION 3.0.2)
-project(jzzj_grasp_interfaces)
-find_package(catkin REQUIRED COMPONENTS message_generation actionlib_msgs std_msgs sensor_msgs geometry_msgs)
-add_message_files(FILES StageCContext.msg TargetSelection.msg TargetObservation.msg TargetObservations.msg)
-add_action_files(FILES VisualGrasp.action)
-add_service_files(FILES ComputeArmMotion.srv)
-generate_messages(DEPENDENCIES actionlib_msgs std_msgs sensor_msgs geometry_msgs)
-catkin_package(CATKIN_DEPENDS message_runtime actionlib_msgs std_msgs sensor_msgs geometry_msgs)

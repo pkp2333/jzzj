@@ -78,7 +78,6 @@ void STrack::re_activate(STrack &new_track, int frame_id, bool new_id)
 	this->is_activated = true;
 	this->frame_id = frame_id;
 	this->score = new_track.score;
-	this->class_id = new_track.class_id;
 	if (new_id)
 		this->track_id = next_id();
 }
@@ -106,7 +105,6 @@ void STrack::update(STrack &new_track, int frame_id)
 	this->is_activated = true;
 
 	this->score = new_track.score;
-	this->class_id = new_track.class_id;
 }
 
 void STrack::static_tlwh()

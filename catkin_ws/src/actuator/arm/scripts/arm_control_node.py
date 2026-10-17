@@ -1,8 +1,5 @@
 #!/usr/bin/python3
 # -*- coding: utf-8 -*-
-import os
-import sys
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import time
 import numpy as np
 from threading import Lock
@@ -38,9 +35,6 @@ class ArmNode:
 
         rospy.loginfo(f"机械臂控制节点初始化中...\n")
 
-        # Share an OS lease with the opt-in stage-C trajectory driver.
-        from hardware_lease import HardwareLease
-        self.hardware_lease = HardwareLease(arm_dir)
         self.Arm = Arm_Device(lr=arm_dir)
         time.sleep(.01)
 
@@ -176,13 +170,6 @@ class ArmNode:
 
 if __name__ == '__main__':
     rospy.init_node('arm_ctrl_node', anonymous=True)
-    mode = rospy.get_param("~control_mode", "legacy")
-    if mode == "trajectory":
-        from arm_trajectory_node import TrajectoryDriver
-        arm = TrajectoryDriver()
-    elif mode == "legacy":
-        arm = ArmNode()
-    else:
-        raise ValueError("control_mode must be legacy or trajectory")
+    arm = ArmNode()
     rospy.spin()
     

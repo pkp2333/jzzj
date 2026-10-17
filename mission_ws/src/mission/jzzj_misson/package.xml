@@ -9,8 +9,6 @@
   <depend>rospy</depend>
   <depend>std_msgs</depend>
   <exec_depend>jzzj_visual_servo</exec_depend>
-  <exec_depend>actionlib</exec_depend>
-  <exec_depend>jzzj_grasp_interfaces</exec_depend>
   <export>
   </export>
 </package>
