@@ -183,3 +183,11 @@ python3 -B mission_ws/src/mission/jzzj_grasp/tests/test_ros_contracts.py
 - 固定工况连续 5 次成功以及抓空、遮挡、交接失效和掉落不会误报成功的现场验收。
 
 按“观测 → 空载执行/取消 → 软目标抓取 → 持物验证 → 上游交接”顺序推进；全程有现场人员、物理急停和必要限位，不把软件门槛当成物理安全系统。
+
+## SSH 连续坐标 INFO（只读，不执行抓取）
+
+RGB-D 观测节点默认启用 `log_arm_coordinates=true`。每个新鲜有效源帧中的每个候选目标输出一行 `[ARM_TARGET]`，包含采集时间、track ID、标签、颜色及 `arm_left/arm_base_link` 下的有符号 X/Y/Z（米）。相同时间戳不重复打印；多候选分别标注 ID，不宣称已经选定抓取对象。坐标轴正向以实际标定的机械臂基坐标为准，不直接假设为车体前/左/上。
+
+`surface_m` 是目标表面的三维观测点；只有所选 `grasp_profile` 的 `calibrated=true` 且偏移有效时，才按与抓取核心相同的 `surface_to_grasp` 显示 `grasp_tcp_m`。否则显示 `UNAVAILABLE(profile_not_calibrated)`，不会把表面点或零偏移冒充实际夹取 TCP 点。日志不代表可达性/IK/碰撞校验通过，均标注 candidate_only=true。
+
+需在真实彩深配准、深度比例、相机到左臂外参已核对的部署配置下启用 `enable_rgbd_observer:=true observation_config:=/path/calibrated_stage_c_fruit6.yaml`；当前 RGB-only 默认入口无法输出机械臂三维坐标。目标丢失、观测无效或标定缺失时不输出旧坐标，不应仅为显示数字开启标定确认开关。可通过 `log_arm_coordinates:=false` 关闭连续日志，`grasp_profile:=tabletop` 选择已标定偏移。

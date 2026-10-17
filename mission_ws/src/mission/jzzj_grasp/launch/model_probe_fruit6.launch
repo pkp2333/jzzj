@@ -7,6 +7,8 @@
   <arg name="enable_rgbd_observer" default="false"/>
   <arg name="observation_config" default="$(find jzzj_grasp)/params/stage_c_fruit6.yaml"/>
   <arg name="target_color" default="red"/>
+  <arg name="log_arm_coordinates" default="true"/>
+  <arg name="grasp_profile" default="tabletop"/>
   <include if="$(arg start_camera)" file="$(find ascamera)/launch/hp60c.launch"/>
   <group ns="yolov5_rknn_rc">
     <rosparam command="load" file="$(find jzzj_grasp)/params/detector_fruit6.yaml"/>
@@ -25,6 +27,8 @@
   <group if="$(arg enable_rgbd_observer)">
     <node pkg="jzzj_visual_servo" type="stage_c_observer.py" name="stage_c_observer" output="screen">
       <rosparam command="load" file="$(arg observation_config)"/>
+      <param name="log_arm_coordinates" value="$(arg log_arm_coordinates)"/>
+      <param name="grasp_profile" value="$(arg grasp_profile)"/>
       <param name="perception/rgb_topic" value="$(arg rgb_topic)"/>
       <param name="perception/detections_topic" value="$(arg detections_topic)"/>
     </node>

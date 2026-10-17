@@ -11,12 +11,16 @@ from geometry_msgs.msg import Point
 from user_msgs.msg import ObjDets
 from jzzj_grasp_interfaces.msg import TargetSelection, TargetObservation, TargetObservations
 from jzzj_visual_servo.perception import Candidate, DetectorAdapter, project_depth_to_rgb
+from jzzj_visual_servo.coordinate_info import coordinate_info
 
 class Observer:
     def __init__(self):
         self.cfg=rospy.get_param('~perception')
         self.adapter=DetectorAdapter(self.cfg)
         self.tune=rospy.get_param('~tune_color',False)
+        self.log_coordinates=rospy.get_param('~log_arm_coordinates',True)
+        self.grasp_profile_name=rospy.get_param('~grasp_profile','tabletop')
+        self.grasp_profile=rospy.get_param('~execution/profiles',{}).get(self.grasp_profile_name,{})
         self.bridge=CvBridge();self.lock=threading.RLock()
         self.rgb=deque(maxlen=120);self.depth=deque(maxlen=120);self.pending=deque(maxlen=15)
         self.rgb_info=self.depth_info=None;self.selection=None;self.last=0.
@@ -123,7 +127,13 @@ class Observer:
         with self.lock:
             if self.selection is not s:return
         self.pub.publish(output)
-        for o in output.targets:self.single.publish(o)
+        for o in output.targets:
+            self.single.publish(o)
+            if self.log_coordinates and o.valid:
+                rospy.loginfo(coordinate_info(
+                    o.header.frame_id, o.header.stamp.to_sec(), o.track_id,
+                    o.label, o.color, (o.position.x, o.position.y, o.position.z),
+                    self.grasp_profile_name, self.grasp_profile))
 
 if __name__=='__main__':
     rospy.init_node('stage_c_observer');Observer();rospy.spin()

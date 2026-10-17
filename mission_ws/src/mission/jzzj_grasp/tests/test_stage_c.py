@@ -197,4 +197,33 @@ class DriverAndModelTests(unittest.TestCase):
             labels.write_text('2\nbox\nbox\n')
             with self.assertRaises(ValueError):check(model,labels,2)
 
+class CoordinateInfoTests(unittest.TestCase):
+    def render(self, profile, point=(.15,-.02,.10)):
+        from jzzj_visual_servo.coordinate_info import coordinate_info
+        return coordinate_info('arm_left/arm_base_link',100.,7,'fruit-1','red',point,'tabletop',profile)
+
+    def test_calibrated_grasp_offset_in_arm_axes(self):
+        text=self.render({'calibrated':True,'surface_to_grasp':[.01,.02,-.015]})
+        self.assertIn('frame=arm_left/arm_base_link',text)
+        self.assertIn('grasp_tcp_m=(X=+0.1600,Y=+0.0000,Z=+0.0850)',text)
+        self.assertIn('candidate_only=true',text)
+
+    def test_uncalibrated_profile_never_prints_fake_grasp(self):
+        text=self.render({'calibrated':False,'surface_to_grasp':[0,0,-.015]})
+        self.assertIn('surface_m=(X=+0.1500,Y=-0.0200,Z=+0.1000)',text)
+        self.assertIn('grasp_tcp_m=UNAVAILABLE',text)
+        self.assertNotIn('grasp_tcp_m=(',text)
+
+    def test_missing_or_nonfinite_offset_not_used(self):
+        for profile in ({},{'calibrated':True,'surface_to_grasp':[0,0,float('nan')]}):
+            self.assertIn('UNAVAILABLE',self.render(profile))
+
+    def test_invalid_surface_rejected(self):
+        with self.assertRaises(ValueError):self.render({},(0,0,float('nan')))
+
+    def test_each_message_is_a_single_line(self):
+        from jzzj_visual_servo.coordinate_info import coordinate_info
+        text=coordinate_info('arm_left/arm_base_link',100.,7,'fruit-1\nBAD','red',(0,0,.1),'tabletop',{})
+        self.assertNotIn('\n',text)
+
 if __name__=='__main__':unittest.main()
