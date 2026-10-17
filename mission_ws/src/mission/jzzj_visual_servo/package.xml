@@ -1,14 +1,13 @@
-<?xml version="1.0"?>
 <package format="2">
-  <name>jzzj_visual_servo</name>
-  <version>0.1.0</version>
-  <description>Visual-servoing interface for front-camera left-arm grasp alignment.</description>
-  <maintainer email="maintainer@example.com">jzzj maintainers</maintainer>
-  <license>TODO</license>
-  <buildtool_depend>catkin</buildtool_depend>
-  <depend>geometry_msgs</depend>
-  <depend>rospy</depend>
-  <depend>std_msgs</depend>
-  <export>
-  </export>
+<name>jzzj_visual_servo</name><version>0.2.0</version><description>Fixed-base stage C visual grasp.</description>
+<maintainer email="maintainer@example.com">jzzj maintainers</maintainer><license>TODO</license><buildtool_depend>catkin</buildtool_depend>
+<depend>rospy</depend>
+<depend>cv_bridge</depend>
+<depend>sensor_msgs</depend>
+<depend>geometry_msgs</depend>
+<depend>std_msgs</depend>
+<depend>tf2_ros</depend>
+<depend>jzzj_grasp_interfaces</depend>
+<depend>user_msgs</depend>
+<exec_depend>python3-numpy</exec_depend><exec_depend>python3-opencv</exec_depend>
 </package>

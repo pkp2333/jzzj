@@ -1,0 +1,14 @@
+<launch>
+  <arg name="config" default="$(find jzzj_grasp)/params/stage_c.yaml"/>
+  <arg name="target_color" default="red"/>
+  <arg name="tune_color" default="false"/>
+  <arg name="log_arm_coordinates" default="true"/>
+  <arg name="grasp_profile" default="tabletop"/>
+  <node pkg="jzzj_visual_servo" type="stage_c_observer.py" name="stage_c_observer" output="screen">
+    <rosparam command="load" file="$(arg config)"/>
+    <param name="log_arm_coordinates" value="$(arg log_arm_coordinates)"/>
+    <param name="grasp_profile" value="$(arg grasp_profile)"/>
+    <param name="tune_color" value="$(arg tune_color)"/>
+  </node>
+  <node pkg="rostopic" type="rostopic" name="stage_c_observe_selection" args="pub -l /stage_c/selection jzzj_grasp_interfaces/TargetSelection '{session_id: observation-only, target_color: $(arg target_color), enabled: true}'"/>
+</launch>

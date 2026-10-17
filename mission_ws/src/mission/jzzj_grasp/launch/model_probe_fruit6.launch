@@ -1,0 +1,39 @@
+<launch>
+  <!-- External model directory is deliberately required. No Windows machine path or weights in this package. -->
+  <arg name="model_dir"/>
+  <arg name="start_camera" default="false"/>
+  <arg name="rgb_topic" default="/ascamera_hp60c/rgb0/image"/>
+  <arg name="detections_topic" default="/ascamera_hp60c/rgb0/yolov5_detections"/>
+  <arg name="enable_rgbd_observer" default="false"/>
+  <arg name="observation_config" default="$(find jzzj_grasp)/params/stage_c_fruit6.yaml"/>
+  <arg name="target_color" default="red"/>
+  <arg name="log_arm_coordinates" default="true"/>
+  <arg name="grasp_profile" default="tabletop"/>
+  <include if="$(arg start_camera)" file="$(find ascamera)/launch/hp60c.launch"/>
+  <group ns="yolov5_rknn_rc">
+    <rosparam command="load" file="$(find jzzj_grasp)/params/detector_fruit6.yaml"/>
+    <param name="image_topic_name" value="$(arg rgb_topic)"/>
+    <param name="model_url" value="$(arg model_dir)/yolov5s.rknn"/>
+    <param name="labels_url" value="$(find jzzj_grasp)/resources/fruit6_labels.txt"/>
+    <node pkg="jzzj_grasp" type="run_verified_fruit6.py" name="fruit6_detector" output="screen" required="true"
+      args="--model-dir &quot;$(arg model_dir)&quot; --manifest &quot;$(find jzzj_grasp)/resources/fruit6_manifest.json&quot; --labels &quot;$(find jzzj_grasp)/resources/fruit6_labels.txt&quot; --config &quot;$(find jzzj_grasp)/params/detector_fruit6.yaml&quot;">
+      <remap from="$(eval arg('rgb_topic').rsplit('/', 1)[0] + '/yolov5_detections')" to="$(arg detections_topic)"/>
+    </node>
+  </group>
+  <node pkg="jzzj_grasp" type="model_probe_overlay.py" name="fruit6_overlay" output="screen">
+    <param name="rgb_topic" value="$(arg rgb_topic)"/>
+    <param name="detections_topic" value="$(arg detections_topic)"/>
+  </node>
+  <group if="$(arg enable_rgbd_observer)">
+    <node pkg="jzzj_visual_servo" type="stage_c_observer.py" name="stage_c_observer" output="screen">
+      <rosparam command="load" file="$(arg observation_config)"/>
+      <param name="log_arm_coordinates" value="$(arg log_arm_coordinates)"/>
+      <param name="grasp_profile" value="$(arg grasp_profile)"/>
+      <param name="perception/rgb_topic" value="$(arg rgb_topic)"/>
+      <param name="perception/detections_topic" value="$(arg detections_topic)"/>
+    </node>
+    <!-- Selection is observational only, never a parking/arm-control handoff. -->
+    <node pkg="rostopic" type="rostopic" name="fruit6_observe_selection"
+      args="pub -l /stage_c/selection jzzj_grasp_interfaces/TargetSelection '{session_id: observation-only, target_color: $(arg target_color), enabled: true}'"/>
+  </group>
+</launch>

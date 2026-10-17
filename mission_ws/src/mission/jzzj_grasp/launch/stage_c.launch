@@ -1,0 +1,29 @@
+<launch>
+  <arg name="backend" default="sim"/>
+  <arg name="config" default="$(find jzzj_grasp)/params/stage_c.yaml"/>
+  <arg name="start_camera" default="false"/>
+  <arg name="start_detector" default="false"/>
+  <arg name="detector_config" default=""/>
+  <arg name="start_arm" default="false"/>
+  <arg name="arm_config" default=""/>
+  <arg name="start_kinematics" default="false"/>
+  <arg name="kinematics_config" default=""/>
+  <include if="$(arg start_camera)" file="$(find ascamera)/launch/hp60c.launch"/>
+  <group if="$(arg start_detector)">
+    <rosparam command="load" file="$(arg detector_config)" ns="yolov5_rknn_rc"/>
+    <node pkg="yolov5_rknn" type="yolov5_rknn_stream" name="stage_c_detector" ns="yolov5_rknn_rc" output="screen"/>
+  </group>
+  <node if="$(arg start_arm)" pkg="arm" type="arm_trajectory_node.py" name="arm_trajectory" ns="arm_left" output="screen">
+    <rosparam command="load" file="$(arg arm_config)"/>
+  </node>
+  <node if="$(arg start_kinematics)" pkg="jzzj_grasp" type="stage_c_kinematics" name="stage_c_kinematics" output="screen">
+    <rosparam command="load" file="$(arg kinematics_config)"/>
+  </node>
+  <node if="$(eval arg('backend') == 'real')" pkg="jzzj_visual_servo" type="stage_c_observer.py" name="stage_c_observer" output="screen">
+    <rosparam command="load" file="$(arg config)"/>
+  </node>
+  <node pkg="jzzj_grasp" type="stage_c_server.py" name="stage_c_server" output="screen">
+    <rosparam command="load" file="$(arg config)"/>
+    <param name="backend" value="$(arg backend)"/>
+  </node>
+</launch>

@@ -1,0 +1,49 @@
+* text=auto
+
+# Files executed or built on Linux must use LF.
+*.py text eol=lf
+*.sh text eol=lf
+*.bash text eol=lf
+*.c text eol=lf
+*.cc text eol=lf
+*.cpp text eol=lf
+*.h text eol=lf
+*.hpp text eol=lf
+*.cmake text eol=lf
+CMakeLists.txt text eol=lf
+*.launch text eol=lf
+*.xml text eol=lf
+*.yaml text eol=lf
+*.yml text eol=lf
+*.msg text eol=lf
+*.srv text eol=lf
+*.action text eol=lf
+*.json text eol=lf
+# This label file is byte-hash pinned by the model manifest.
+mission_ws/src/mission/jzzj_grasp/resources/fruit6_labels.txt text eol=lf
+*.urdf text eol=lf
+*.md text eol=lf
+
+# Windows command files keep CRLF.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Binary assets and vendor libraries.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.pdf binary
+*.zip binary
+*.7z binary
+*.so binary
+*.a binary
+*.lib binary
+*.stl binary
+*.STL binary
+*.rknn binary
+*.rkllm binary
+*.onnx binary
+*.pt binary
+*.pth binary
+
