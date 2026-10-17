@@ -1,0 +1,19 @@
+# Flat parameters loaded under /yolov5_rknn_rc, not the old nested YAML shape.
+# Replace with the supplied model's actual class count, anchors and labels.
+image_topic_name: /ascamera_hp60c/rgb0/image
+model_url: /REQUIRED/your_model.rknn
+labels_url: /REQUIRED/your_labels.txt
+class_num: 0
+anchors: []
+conf_thresh: 0.5
+iou_thresh: 0.5
+expected_input_width: 0
+expected_input_height: 0
+max_frame_age: 0.5
+visualize: false
+kill_switch_topic: /stage_c/detector_run
+byte_track:
+  track_thresh: 0.4
+  high_thresh: 0.5
+  match_thresh: 0.7
+  track_buffer: 30

@@ -1,9 +1,13 @@
 <launch>
+  <arg name="external_stage_c" default="false"/>
+  <arg name="stage_c_session_id" default=""/>
+  <arg name="stage_c_profile" default="tabletop"/>
+  <arg name="stage_c_timeout" default="90.0"/>
   <arg name="auto_start" default="false" />
   <arg name="target_color" default="" />
   <arg name="enable_visual_servo" default="false" />
 
-  <include if="$(arg enable_visual_servo)"
+  <include if="$(eval arg('enable_visual_servo') and not arg('external_stage_c'))"
            file="$(find jzzj_visual_servo)/launch/jzzj_visual_servo.launch">
     <arg name="target_color" value="$(arg target_color)" />
   </include>
@@ -12,6 +16,10 @@
     <rosparam command="load"
               file="$(find jzzj_misson)/params/mission.yaml"
               ns="jzzj_misson_node" />
+    <param name="jzzj_misson_node/external_stage_c" value="$(arg external_stage_c)"/>
+    <param name="jzzj_misson_node/stage_c_session_id" value="$(arg stage_c_session_id)"/>
+    <param name="jzzj_misson_node/stage_c_profile" value="$(arg stage_c_profile)"/>
+    <param name="jzzj_misson_node/stage_c_timeout" value="$(arg stage_c_timeout)"/>
     <param name="jzzj_misson_node/auto_start" value="$(arg auto_start)" />
     <param name="jzzj_misson_node/target_color" value="$(arg target_color)" />
 
@@ -19,10 +27,10 @@
           type="jzzj_misson_node.py"
           name="jzzj_misson_node"
           output="screen">
-      <remap from="visual_ready"
-              to="/jzzj_visual_servo/grasp_ready" />
-      <remap from="visual_enable"
-              to="/jzzj_visual_servo/enable" />
+      <remap from="~visual_ready"
+              to="/jzzj_visual_servo/jzzj_visual_servo_node/grasp_ready" />
+      <remap from="~visual_enable"
+              to="/jzzj_visual_servo/jzzj_visual_servo_node/enable" />
     </node>
   </group>
 </launch>

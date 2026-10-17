@@ -17,6 +17,10 @@ CMakeLists.txt text eol=lf
 *.yml text eol=lf
 *.msg text eol=lf
 *.srv text eol=lf
+*.action text eol=lf
+*.json text eol=lf
+# This label file is byte-hash pinned by the model manifest.
+mission_ws/src/mission/jzzj_grasp/resources/fruit6_labels.txt text eol=lf
 *.urdf text eol=lf
 *.md text eol=lf
 

@@ -4,6 +4,19 @@
 
 > 当前快照仍有若干影响完整复现的缺项。首次编译或上车前请先阅读 [KNOWN_ISSUES.md](KNOWN_ISSUES.md)，尤其是缺失的 `GrabCmd.msg`。
 
+## 任务范围说明
+
+- [任务目标与历史进度](TASK_PROGRESS.md)：新增单左臂任务的目标与历史记录；当前实现以源码核对结果为准。
+
+新增 `jzzj_misson`（保留现有拼写）与 `jzzj_visual_servo` 分别提供单左臂任务编排框架和视觉误差比例控制框架；不替代下述原双臂流程，也尚未接通真实定位、识别与执行器。其启动入口、私有话题及参数连接仍需核对，请勿把框架启动成功当成整车任务已实现。
+
+## 阶段 C：前置视觉闭环抓取
+
+已新增 YOLOv5 RKNN 检测框内颜色筛选、RGB-D 观测、固定底盘左臂抓取 Action、模拟后端和总任务薄适配。真实运动默认关闭，模型/标签和机器人标定仍需现场提供，尚未进行 ROS/ARM64 构建或实机抓取验收。
+
+- [阶段 C 接入与验证说明](mission_ws/src/mission/jzzj_grasp/README.md)
+- [阶段 C 架构变化索引](docs/STAGE_C_IMPLEMENTATION.md)
+
 ## 目录结构
 
 ```text
@@ -20,7 +33,9 @@
 │   └── src/mission/
 │       ├── car_localization/   # AprilTag 位姿融合
 │       ├── wp_nav_pid/         # 航点 PID 导航
-│       └── mission_manage/     # 任务状态机、抓取、投放与测试工具
+│       ├── mission_manage/     # 原双臂任务、抓取、投放与测试工具
+│       ├── jzzj_misson/        # 新单左臂任务状态框架
+│       └── jzzj_visual_servo/  # 新视觉闭环控制框架
 ├── 底盘代码/
 │   ├── chassis/                # STM32F407 + RT-Thread 底盘固件
 │   └── arm_iic_control/        # STM32F103 舵机/I2C 控制工程
@@ -43,7 +58,9 @@
 | `algorithm/llm/deepseek` | 本地 RKLLM 自然语言任务解析 |
 | `car_localization` | 前后相机定位信息融合 |
 | `wp_nav_pid` | 航点导航控制 |
-| `mission_manage` | 比赛任务主状态机 |
+| `mission_manage` | 原双臂比赛任务主流程 |
+| `jzzj_misson` | 新单左臂任务阶段框架，执行接口待接入 |
+| `jzzj_visual_servo` | 新视觉误差比例控制框架，识别与执行适配待接入 |
 
 ## 运行环境
 
@@ -68,6 +85,8 @@
 
 ## 构建
 
+> 补充核对：当前 `mission_ws` 顶层 CMake 文件是普通路径文本，新包安装规则也有待验证问题。请先核对工作空间初始化、包安装规则及构建依赖，不要仅按“文件存在”判断工作空间已初始化；下列命令应在相关阻塞项处理后使用。
+
 在 Orange Pi 上先解决 [KNOWN_ISSUES.md](KNOWN_ISSUES.md) 中的阻塞项。当前 `catkin_ws/src` 缺少 catkin 顶层 `CMakeLists.txt`，首次构建时先初始化，再按依赖顺序编译：
 
 ```bash
@@ -87,7 +106,7 @@ source devel/setup.bash
 
 ## 启动
 
-完整比赛任务入口：
+以下为原双臂比赛任务的整车启动入口，会启动真实驱动；新任务应单独进行隔离验证。当前快照仍需先处理已知阻塞项：
 
 ```bash
 roslaunch mission_manage mission.launch

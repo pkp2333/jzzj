@@ -50,3 +50,9 @@ Use advance only while testing a stage manually. Real integration should let the
 6. Connect the drop-box alignment and release confirmation.
 
 This is a framework, not a completed hardware implementation. It must be tested on the robot with an emergency stop available.
+
+## 可选独立阶段 C（2026-10-17）
+
+`external_stage_c:=true stage_c_session_id:=<上游会话>` 启用阶段 C Action 客户端；需另外启动 jzzj_grasp 和真实交接心跳。抓取阶段不再接受人工 advance/旧 Bool 推进，仅当前 Action 的完整成功结果才进入 MOVE_TO_DROP。stop/超时会取消并继续等待停稳确认；A/B/D/E 算法不变。
+
+接口、模拟、模型/标定和未验收项见[阶段 C 接入说明](../jzzj_grasp/README.md)。原文档下面提到的包级话题是历史意图，旧源码实际使用节点私有话题，例如 `/jzzj_misson/jzzj_misson_node/start`；不要省略节点名。新 C 使用 Action，不依赖这些占位字符串执行硬件。

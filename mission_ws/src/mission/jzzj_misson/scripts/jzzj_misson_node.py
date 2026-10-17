@@ -1,6 +1,9 @@
 #!/usr/bin/env python3
 from __future__ import print_function
 
+import os
+import sys
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import rospy
 from std_msgs.msg import Bool, Empty, String
 
@@ -31,6 +34,12 @@ class JzzjMissonNode(object):
         self.require_drop_confirmation = rospy.get_param(
             "~require_drop_confirmation", False)
         self.target_color = str(rospy.get_param("~target_color", ""))
+        self.external_stage_c = rospy.get_param("~external_stage_c", False)
+        self.stage_c = None
+        if self.external_stage_c:
+            from stage_c_adapter import StageCAdapter
+            self.stage_c = StageCAdapter()
+            rospy.on_shutdown(self.stage_c.cancel)
 
         stages = rospy.get_param("~stages", [
             self.WAIT_TAG, self.LOCALIZE, self.MOVE_TO_PICK,
@@ -73,9 +82,18 @@ class JzzjMissonNode(object):
         self._start_callback(Empty())
 
     def _start_callback(self, _message):
+        if self.stage_c and self.stage_c.active:
+            rospy.logwarn("Cannot start before stage C cancellation completes")
+            return
         if self.state in ("RUNNING", "COMPLETED"):
             rospy.logwarn("Cannot start while mission is %s", self.state)
             return
+        if self.stage_c:
+            try:
+                self.stage_c.reset()
+            except Exception as exc:
+                rospy.logerr(str(exc))
+                return
         self.stage_index = 0
         self.stage_started_at = rospy.Time.now()
         self.tag_ready = False
@@ -91,6 +109,9 @@ class JzzjMissonNode(object):
             self._publish_safe_stop()
 
     def _advance_callback(self, _message):
+        if self.stage_c and self._current_stage() in (self.PICK_ALIGN,self.SEARCH_OBJECT,self.VISUAL_APPROACH,self.GRASP,self.VERIFY_GRASP):
+            rospy.logwarn("Manual advance disabled while external stage C owns grasp stages")
+            return
         if self.state == "RUNNING":
             self._advance_stage()
 
@@ -107,6 +128,9 @@ class JzzjMissonNode(object):
         self.drop_confirmed = bool(message.data)
 
     def _tick(self, _event):
+        if self.stage_c and (self.stage_c.active or self.stage_c.done):
+            self.stage_c.tick(self)
+            return
         if self.state != "RUNNING":
             return
 
@@ -158,6 +182,14 @@ class JzzjMissonNode(object):
     def _publish_stage_command(self):
         stage = self._current_stage()
         payload = "stage={};target_color={}".format(stage, self.target_color)
+        if self.stage_c and stage in (self.PICK_ALIGN,self.SEARCH_OBJECT,self.VISUAL_APPROACH,self.GRASP,self.VERIFY_GRASP):
+            self.visual_enable_pub.publish(Bool(data=False))
+            if stage == self.PICK_ALIGN and not self.stage_c.active:
+                try:
+                    self.stage_c.start(self.target_color)
+                except Exception as exc:
+                    self._fault(str(exc))
+            return
         self.visual_enable_pub.publish(Bool(data=stage in (
             self.PICK_ALIGN, self.SEARCH_OBJECT, self.VISUAL_APPROACH)))
         if stage in (self.MOVE_TO_PICK, self.MOVE_TO_DROP, self.DROP_ALIGN):
@@ -167,6 +199,8 @@ class JzzjMissonNode(object):
             self.arm_pub.publish(String(data=payload))
 
     def _publish_safe_stop(self):
+        if self.stage_c:
+            self.stage_c.cancel()
         self.motion_pub.publish(String(data="STOP"))
         self.arm_pub.publish(String(data="SAFE"))
         self.visual_enable_pub.publish(Bool(data=False))
