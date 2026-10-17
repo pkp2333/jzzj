@@ -24,6 +24,8 @@ def load_manifest(path):
         raise ValueError('unsupported model manifest')
     if m['labels']['class_num']!=6 or m['labels']['names']!=['fruit-'+str(i) for i in range(1,7)]:
         raise ValueError('fruit6 neutral label contract mismatch')
+    if m['labels'].get('species_map') != [0,1,1,0,1,0] or m['labels'].get('species_labels') != ['cherry','lemon']:
+        raise ValueError('confirmed fruit species mapping mismatch')
     if m['model']['input']['shape']!=[1,3,640,640] or [o['shape'] for o in m['model']['outputs']]!=[[1,33,80,80],[1,33,40,40],[1,33,20,20]]:
         raise ValueError('fruit6 tensor contract mismatch')
     if len(m['anchors'])!=18 or any(not math.isfinite(v) or v<=0 for v in m['anchors']):
@@ -43,6 +45,8 @@ def validate_config(config,manifest):
             raise ValueError('detector config mismatch: '+key)
     if not math.isfinite(config['max_frame_age']) or config['max_frame_age']<=0:
         raise ValueError('invalid detector frame age')
+    if config.get('species_map') != [0,1,1,0,1,0] or config.get('species_labels') != ['cherry','lemon']:
+        raise ValueError('confirmed fruit species mapping mismatch')
 
 
 def check_resources(model_dir,labels_path,manifest_path,all_assets=False):
@@ -65,6 +69,7 @@ def check_resources(model_dir,labels_path,manifest_path,all_assets=False):
             checked.append(name)
     return {'profile':m['profile'],'model':str(model),'labels':str(labels.resolve()),
             'model_sha256':m['model']['sha256'],'class_names':m['labels']['names'],
+            'business_class_names':m['labels']['species_labels'],'raw_to_species':m['labels']['species_map'],
             'checked_assets':sorted(set(checked)),
             'runtime_compatibility':'NOT_VALIDATED_ON_DEVICE','purpose':'integration_validation_only'}
 

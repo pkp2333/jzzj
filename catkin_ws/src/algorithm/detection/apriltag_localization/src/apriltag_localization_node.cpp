@@ -1,5 +1,7 @@
 #include <iostream>
 #include <mutex>
+#include <cstdint>
+#include <cmath>
 #include <math.h>
 #include <opencv2/opencv.hpp>
 #include <apriltag/apriltag.h>
@@ -23,6 +25,7 @@
 std::mutex rgb_frame_mutex;
 cv::Mat rgb_frame_sub;
 std_msgs::Header hd;
+uint64_t frame_generation = 0;
 
 std_msgs::Int16 at_target_id;
 
@@ -34,11 +37,13 @@ void at_target_id_cb(const std_msgs::Int16::ConstPtr& msg) {
 
 void image_raw_cb(const sensor_msgs::Image::ConstPtr& msg) {
     
-    cv::Mat msg2frame = cv_bridge::toCvShare(msg, msg->encoding)->image;
+    if (msg->header.stamp.isZero()) return;
+    cv::Mat msg2frame = cv_bridge::toCvShare(msg, "bgr8")->image;
+    std::lock_guard<std::mutex> lock(rgb_frame_mutex);
+    if (!hd.stamp.isZero() && msg->header.stamp <= hd.stamp) return;
     hd = msg->header;
-    rgb_frame_mutex.lock();
     rgb_frame_sub = msg2frame.clone();
-    rgb_frame_mutex.unlock();
+    ++frame_generation;
 
 }
 
@@ -65,6 +70,10 @@ int main(int argc, char **argv) {
     nh.param<int>("apriltag_localization/resolve_method", resolve_method, 0);
     nh.param<bool>("apriltag_localization/visualize", visualize, false);
     nh.param<bool>("apriltag_localization/pub_tf", pub_tf, false);
+    double max_frame_age;
+    nh.param("apriltag_localization/max_frame_age", max_frame_age, 0.5);
+    if (!std::isfinite(max_frame_age) || max_frame_age <= 0 || resolve_method < 0 || resolve_method > 5)
+        return -1;
 
     size_t last_slash_pos = image_topic_name.find_last_of('/');
     std::string camera_name = image_topic_name.substr(0, last_slash_pos);
@@ -82,6 +91,18 @@ int main(int argc, char **argv) {
     cameraMatrix = cv::Mat::eye(3, 3, CV_64F);
     for (int i = 0; i < 9; ++i) {
         cameraMatrix.at<double>(i/3, i%3) = camera_info_msg->K[i];
+    }
+    // A vertical reflection reverses tag handedness. Decode/PnP in original
+    // sensor pixels, retaining the physical optical frame and extrinsics.
+    const bool flipped_input = cameraMatrix.at<double>(1,1) < 0;
+    if (flipped_input) {
+        for (int c = 0; c < 3; ++c)
+            cameraMatrix.at<double>(1,c) = (cameraHeight-1.) * cameraMatrix.at<double>(2,c) - cameraMatrix.at<double>(1,c);
+    }
+    if (cameraWidth <= 0 || cameraHeight <= 0 ||
+        !cv::checkRange(cameraMatrix) || cameraMatrix.at<double>(0,0) <= 0 || cameraMatrix.at<double>(1,1) <= 0) {
+        ROS_ERROR("Invalid camera calibration");
+        return -1;
     }
     distCoeffs = cv::Mat::zeros(camera_info_msg->D.size(), 1, CV_64F);
     for (size_t i = 0; i < camera_info_msg->D.size(); ++i) {
@@ -129,17 +150,28 @@ int main(int argc, char **argv) {
     at_target_id.data = -1;
 
     ros::Rate r(30);
+    uint64_t processed_generation = 0;
+    std_msgs::Header source_header;
     
     while (ros::ok()) {
-        at_detected.data = false;
-        
-        if (!rgb_frame_sub.empty()) {
-            
-            cv::Mat frame, frame_gray;
-
-            rgb_frame_mutex.lock();
-            frame = rgb_frame_sub.clone();
-            rgb_frame_mutex.unlock();
+        cv::Mat frame, frame_gray;
+        {
+            std::lock_guard<std::mutex> lock(rgb_frame_mutex);
+            if (processed_generation != frame_generation && !rgb_frame_sub.empty()) {
+                frame = rgb_frame_sub.clone();
+                source_header = hd;
+                processed_generation = frame_generation;
+            }
+        }
+        const double age = source_header.stamp.isZero() ? max_frame_age+1 :
+            (ros::Time::now()-source_header.stamp).toSec();
+        if (age > max_frame_age || age < -0.05) {
+            at_detected.data = false;
+            frame.release();
+        }
+        if (!frame.empty()) {
+            at_detected.data = false;
+            if (flipped_input) cv::flip(frame, frame, 0);
 
             auto start = std::chrono::system_clock::now();
 
@@ -205,7 +237,7 @@ int main(int argc, char **argv) {
                 cv::Mat r_vec, t_vec;
                 bool success = cv::solvePnP(objectPoints, imagePoints, cameraMatrix, distCoeffs, r_vec, t_vec, false, resolve_method);
 
-                if (success) {
+                if (success && (ros::Time::now()-source_header.stamp).toSec() <= max_frame_age) {
                 
                     at_detected.data = true;
                     
@@ -238,7 +270,7 @@ int main(int argc, char **argv) {
                     yaw = yaw * 180.0 / M_PI;
 
                     geometry_msgs::PoseWithCovarianceStamped cam_pose;
-                    cam_pose.header.stamp = ros::Time::now();
+                    cam_pose.header.stamp = source_header.stamp;
                     cam_pose.header.frame_id = "tag_" + std::to_string(ids[close_index]);
                     cam_pose.pose.pose.position.x = translation.x();
                     cam_pose.pose.pose.position.y = translation.y();
@@ -252,9 +284,9 @@ int main(int argc, char **argv) {
 
                     if (pub_tf) {
                         geometry_msgs::TransformStamped transformStamped;
-                        transformStamped.header.stamp = ros::Time::now();
+                        transformStamped.header.stamp = source_header.stamp;
                         transformStamped.header.frame_id = "tag_" + std::to_string(ids[close_index]);
-                        transformStamped.child_frame_id = hd.frame_id;
+                        transformStamped.child_frame_id = source_header.frame_id;
                         transformStamped.transform.translation.x = translation.x();
                         transformStamped.transform.translation.y = translation.y();
                         transformStamped.transform.translation.z = translation.z();
@@ -319,11 +351,12 @@ int main(int argc, char **argv) {
 
             zarray_destroy(detections);
 
-            tag_det_pub.publish(at_detected);
-            sensor_msgs::ImagePtr at_img = cv_bridge::CvImage(hd, "bgr8", frame).toImageMsg();
+            if (flipped_input) cv::flip(frame, frame, 0);
+            sensor_msgs::ImagePtr at_img = cv_bridge::CvImage(source_header, "bgr8", frame).toImageMsg();
             tag_img_pub.publish(at_img);
         
         }
+        tag_det_pub.publish(at_detected);
         
         ros::spinOnce();
         r.sleep();

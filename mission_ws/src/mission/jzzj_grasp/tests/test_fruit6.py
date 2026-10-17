@@ -41,6 +41,8 @@ class ResourceTests(unittest.TestCase):
     def test_valid_synthetic_model_and_labels(self):
         report=check_resources(self.base,LABELS,self.manifest)
         self.assertEqual(report['runtime_compatibility'],'NOT_VALIDATED_ON_DEVICE')
+        self.assertEqual(report['business_class_names'],['cherry','lemon'])
+        self.assertEqual(report['raw_to_species'],[0,1,1,0,1,0])
     def test_missing_model(self):
         self.model.unlink()
         with self.assertRaisesRegex(ValueError,'missing'):check_resources(self.base,LABELS,self.manifest)
@@ -58,7 +60,7 @@ class ResourceTests(unittest.TestCase):
         self.assertEqual(self.m['anchors'][:6],[10,13,16,30,33,23])
         validate_config(json.loads(CONFIG.read_text()),self.m)
     def test_bad_config(self):
-        for key,value in [('class_num',14),('anchors',[]),('expected_input_width',320),('conf_thresh',.5)]:
+        for key,value in [('class_num',14),('anchors',[]),('expected_input_width',320),('conf_thresh',.5),('species_map',[0,1]),('species_labels',['lemon','cherry'])]:
             c=json.loads(CONFIG.read_text());c[key]=value
             with self.assertRaises(ValueError):validate_config(c,self.m)
     def test_manifest_wrong_output_shape(self):
@@ -134,7 +136,9 @@ class LaunchAndRunnerTests(unittest.TestCase):
         self.assertIn('$(find jzzj_grasp)/resources/',params['labels_url'])
     def test_rgbd_config_keeps_hardware_disabled(self):
         c=json.loads((PKG/'params/stage_c_fruit6.yaml').read_text())
-        self.assertEqual(c['perception']['allowed_labels'],load_manifest(MANIFEST)['labels']['names'])
+        self.assertEqual(c['perception']['allowed_labels'],['cherry','lemon'])
+        self.assertEqual(c['perception']['allowed_class_ids'],[0,1])
+        self.assertEqual(json.loads(CONFIG.read_text())['species_map'],[0,1,1,0,1,0])
         for key in ('real_motion_enabled','robot_calibration_confirmed','workspace_clear_confirmed','model_validated'):
             self.assertFalse(c['execution'][key])
         self.assertFalse(c['perception']['calibration_confirmed'])
@@ -207,6 +211,19 @@ class OverlayCallbackTests(unittest.TestCase):
         item=types.SimpleNamespace(class_id=0,label='rotten_lemon')
         image,det=self.messages(detections=[item]);self.o.on_rgb(image);self.o.on_detection(det);self.o.tick(None)
         self.assertEqual(self.status[-1][0],2);self.assertIn('label mismatch',self.status[-1][1])
+    def test_merged_species_are_accepted(self):
+        self.o.labels=['cherry','lemon']
+        for class_id,label in enumerate(self.o.labels):
+            item=types.SimpleNamespace(class_id=class_id,label=label,score=.9,index=1,
+                bbox=types.SimpleNamespace(x1=10,y1=20,x2=30,y2=40))
+            image,det=self.messages(stamp=100.+class_id*.1,detections=[item])
+            self.now[0]=100.+class_id*.1
+            self.o.on_rgb(image);self.o.on_detection(det);self.o.tick(None)
+            self.assertEqual(self.status[-1][0],0)
+    def test_negative_class_id_is_rejected(self):
+        item=types.SimpleNamespace(class_id=-1,label=self.o.labels[-1])
+        image,det=self.messages(detections=[item]);self.o.on_rgb(image);self.o.on_detection(det);self.o.tick(None)
+        self.assertEqual(self.status[-1][0],2)
     def test_detection_can_arrive_before_rgb(self):
         image,det=self.messages();self.o.on_detection(det);self.o.tick(None)
         self.assertEqual(self.published,[])

@@ -165,20 +165,12 @@
       ]
     ],
     "allowed_labels": [
-      "fruit-1",
-      "fruit-2",
-      "fruit-3",
-      "fruit-4",
-      "fruit-5",
-      "fruit-6"
+      "cherry",
+      "lemon"
     ],
     "allowed_class_ids": [
       0,
-      1,
-      2,
-      3,
-      4,
-      5
+      1
     ],
     "min_confidence": 0.25,
     "min_color_pixels": 30,

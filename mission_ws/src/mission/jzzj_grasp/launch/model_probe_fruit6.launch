@@ -21,6 +21,7 @@
     </node>
   </group>
   <node pkg="jzzj_grasp" type="model_probe_overlay.py" name="fruit6_overlay" output="screen">
+    <rosparam param="species_labels">[cherry, lemon]</rosparam>
     <param name="rgb_topic" value="$(arg rgb_topic)"/>
     <param name="detections_topic" value="$(arg detections_topic)"/>
   </node>

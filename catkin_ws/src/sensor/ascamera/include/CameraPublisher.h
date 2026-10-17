@@ -167,6 +167,7 @@ private:
     std::list<PUBLISHER_INFO_S> imgPubList;
     CameraSrv *server = nullptr;
     bool m_logfps = false;
+    bool m_flip_vertical = false;
     std::unordered_map<AS_CAM_PTR, std::shared_ptr<Camera>> m_camera_map;
     LAUNCH_CONFI_PARAM_S m_launch_param;
     std::thread m_monitor_thd;

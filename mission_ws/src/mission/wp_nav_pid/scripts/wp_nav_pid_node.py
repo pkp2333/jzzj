@@ -1,6 +1,9 @@
 #!/home/orangepi/miniconda3/envs/rknn/bin/python
 # -*- coding: utf-8 -*-
 import time
+import math
+import threading
+from functools import wraps
 import cv2
 import numpy as np
 from scipy.spatial.transform import Rotation
@@ -12,8 +15,22 @@ from user_msgs.msg import CarCmd, PID
 from geometry_msgs.msg import Twist, PoseStamped
 
 
+def synchronized(method):
+    @wraps(method)
+    def call(self, *args, **kwargs):
+        with self.pose_lock:
+            return method(self, *args, **kwargs)
+    return call
+
+
 class WaypointNavigationPIDNode(object):
     def __init__(self) -> None:
+        self.pose_lock = threading.RLock()
+        self.pose_timeout = float(rospy.get_param('wp_nav/pose_timeout', 0.5))
+        if not math.isfinite(self.pose_timeout) or self.pose_timeout <= 0:
+            raise ValueError('wp_nav/pose_timeout must be finite and positive')
+        self.pose_stamp = {'front': 0., 'back': 0.}
+        self.pose_received = {'front': -math.inf, 'back': -math.inf}
         
         rospy.loginfo(f"Waypoint Navigation Initializing...\n")
 
@@ -55,8 +72,7 @@ class WaypointNavigationPIDNode(object):
         self.car_target_rpy = [0, 0, 0]
         self.last_yaw = 0
         self.last_spin_dir = 1
-        # 找不到二维码停车标志位
-        self.stop_flag = 0
+        # 无目标停车标志位；失位停车不使用一次性标志。
         self.stop_flag_1 = 0
 
         self.wait_for_acquire = False
@@ -86,6 +102,7 @@ class WaypointNavigationPIDNode(object):
         
         self.car_cmd_pub = rospy.Publisher('car_cmd', CarCmd, queue_size=3)
         self.cmd_vel_pub = rospy.Publisher('cmd_vel', Twist, queue_size=3)
+        rospy.on_shutdown(self.publish_stop)
 
         time.sleep(5)
         self.car_nav_timer = rospy.Timer(rospy.Duration(0.05), self.car_navigator)
@@ -95,22 +112,63 @@ class WaypointNavigationPIDNode(object):
     def __del__(self):
         print('\nWaypoint Navigation Terminated\n')
 
+    @synchronized
     def cam_orie_cb(self, msg:Bool):
         self.cam_orientation = msg.data
 
+    @synchronized
     def tag_det_cb_front(self, msg:Bool):
-        self.get_car_pose_front = msg.data
+        if not msg.data:
+            self.get_car_pose_front = False
 
+    @synchronized
     def tag_det_cb_back(self, msg:Bool):
-        self.get_car_pose_back = msg.data
+        if not msg.data:
+            self.get_car_pose_back = False
 
+    @synchronized
     def front_car_pose_cb(self, msg:PoseStamped):
-        self.car_pose_front = msg
-        self.get_car_pose_front = True
+        self._accept_pose('front', msg)
 
+    @synchronized
     def back_car_pose_cb(self, msg:PoseStamped):
-        self.car_pose_back = msg
-        self.get_car_pose_back = True
+        self._accept_pose('back', msg)
+
+    def _accept_pose(self, source, msg):
+        stamp = msg.header.stamp.to_sec()
+        now = rospy.Time.now().to_sec()
+        p, q = msg.pose.position, msg.pose.orientation
+        values = (p.x, p.y, p.z, q.x, q.y, q.z, q.w, stamp, now)
+        valid = (all(math.isfinite(v) for v in values) and stamp > 0
+                 and stamp > self.pose_stamp[source]
+                 and -.05 <= now - stamp <= self.pose_timeout
+                 and sum(v*v for v in (q.x, q.y, q.z, q.w)) > 1e-12)
+        if not valid:
+            return
+        setattr(self, 'car_pose_' + source, msg)
+        setattr(self, 'get_car_pose_' + source, True)
+        self.pose_stamp[source] = stamp
+        self.pose_received[source] = time.monotonic()
+
+    def _fresh(self, source):
+        age = rospy.Time.now().to_sec() - self.pose_stamp[source]
+        return (getattr(self, 'get_car_pose_' + source)
+                and -.05 <= age <= self.pose_timeout
+                and time.monotonic() - self.pose_received[source] <= self.pose_timeout)
+
+    @synchronized
+    def publish_stop(self):
+        self.cmd_vel = Twist()
+        self.car_cmd.cmd = CarCmd.HOLD
+        self.cmd_vel_pub.publish(self.cmd_vel)
+        self.car_cmd_pub.publish(self.car_cmd)
+
+    def reset_navigation(self):
+        self.car_pid_vertical.reset()
+        self.car_pid_horizontal.reset()
+        self.car_pid_yaw.reset()
+        self.arrive_cnt = 0
+        self.cmd_vel = Twist()
 
     def car_pid_x_cb(self, msg:PID):
         self.kp_x = msg.p
@@ -130,6 +188,7 @@ class WaypointNavigationPIDNode(object):
         self.kd_yaw = msg.d
         self.car_pid_yaw.update_param(p=msg.p, i=msg.i, d=msg.d, i_a=msg.i_activate, o_t=msg.out_thresh)        
 
+    @synchronized
     def car_target_cb(self, msg:PoseStamped):
         if msg.header.seq > self.last_target_id:
             self.now_target_id = msg.header.seq
@@ -152,27 +211,23 @@ class WaypointNavigationPIDNode(object):
         else:
             self.get_target = False
 
+    @synchronized
     def car_navigator(self, *args):
         if not self.task:
+            self.publish_stop()
             return
         
         canvas = np.zeros((400, 480, 3), dtype=np.uint8)
 
-        # 未获取自身位姿 当两个摄像头均丢失位姿信息时停车
+        self.get_car_pose_front = self._fresh('front')
+        self.get_car_pose_back = self._fresh('back')
+        # 无新鲜定位时，每个控制周期都发零速度和 HOLD。
         if not (self.get_car_pose_front or self.get_car_pose_back):
             if not self.wait_for_acquire:
                 self.loc_lost_time = time.time()
                 self.wait_for_acquire = True
-            if time.time() - self.loc_lost_time > 1 and self.stop_flag == 0:
-                self.cmd_vel.linear.x = 0 #-0.05
-                self.cmd_vel.linear.y = 0
-                # self.cmd_vel.angular.z = self.last_spin_dir * 1 * self.DE2RA
-                self.cmd_vel.angular.z = 0
-                self.car_cmd.cmd = self.car_cmd.HOLD
-                self.stop_flag = 1
-                self.car_cmd_pub.publish(self.car_cmd)
-                self.cmd_vel_pub.publish(self.cmd_vel)
-                rospy.loginfo(f"video_lost\n")
+                self.reset_navigation()
+            self.publish_stop()
             
             cv2.putText(canvas, "Wait for self Location",
                         (10, 30), 3, 0.8, (0, 0, 255), 2)
@@ -190,7 +245,8 @@ class WaypointNavigationPIDNode(object):
                 self.suspend = True
             return
         
-        self.stop_flag = 1
+        if self.wait_for_acquire:
+            self.reset_navigation()
         self.wait_for_acquire = False
 
         # 选择采用哪个摄像头数据，当选用摄像头位姿丢失时采用另一个摄像头

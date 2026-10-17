@@ -1,4 +1,5 @@
 #include "usb_cam/UsbCam.h"
+#include <user_msgs/image_orientation.h>
 
 
 UsbCam::UsbCam(ros::NodeHandle &nh) {
@@ -13,6 +14,7 @@ UsbCam::UsbCam(ros::NodeHandle &nh) {
     nh.param<std::string>("/usb_cam/camera_info_path", camera_info_path, "file:///home/jetson/.ros/camera_info/");
     nh.param<std::string>("/usb_cam/kill_switch_topic", kill_switch_topic, "/task");
     nh.param<bool>("/usb_cam/visualize", visualize, false);                  // show image or not.
+    nh.param<bool>("/usb_cam/flip_vertical", flip_vertical, true);
 
     cam_info_manager = std::make_unique<camera_info_manager::CameraInfoManager>(nh, camera_name, camera_info_path + camera_name + "_calib.yaml");
     cam_info = cam_info_manager->getCameraInfo();
@@ -122,8 +124,9 @@ void UsbCam::read_video_buffer() {
         // always retriving image using "grab" in a new thread.
         bool res = cap.grab();
         g_mutex.lock();
-        if (res) {
-            cap.retrieve(g_newest_frame);
+        if (res && cap.retrieve(g_newest_frame) && !g_newest_frame.empty()) {
+            g_newest_stamp = ros::Time::now();
+            ++g_generation;
         }
         g_mutex.unlock();
     }
@@ -140,17 +143,20 @@ void UsbCam::run() {
 
     std_msgs::Header hd;
     hd.frame_id = camera_name;
+    uint64_t published_generation = 0;
 
     while (ros::ok() and task) {
         g_mutex.lock();
-        frame = g_newest_frame.clone();
+        frame.release();
+        if (g_generation != published_generation && !g_newest_frame.empty()) {
+            frame = g_newest_frame.clone();
+            hd.stamp = g_newest_stamp;
+            published_generation = g_generation;
+        }
         g_mutex.unlock();
         
         if (!frame.empty()) {
-            hd.stamp = ros::Time::now();
-
-            // cv::flip(src, src, 1);
-            // cv::flip(src, src, 0);
+            if (flip_vertical) cv::flip(frame, frame, 0);
 
             // cv::line(src, cv::Point(img_center.x, 0), cv::Point(img_center.x, actual_height),  cv::Scalar(0, 0, 255), 1);
             // cv::line(src, cv::Point(0, img_center.y), cv::Point(actual_width, img_center.),  cv::Scalar(0, 0, 255), 1);
@@ -158,8 +164,15 @@ void UsbCam::run() {
             sensor_msgs::ImagePtr msg = cv_bridge::CvImage(hd, "bgr8", frame).toImageMsg();
             camera_image_pub.publish(msg);
             
-            cam_info.header = hd;
-            camera_info_pub.publish(cam_info);
+            sensor_msgs::CameraInfo output_info = cam_info;
+            output_info.header = hd;
+            if (output_info.K[0] == 0) {
+                // ROS convention: zero K[0] means uncalibrated, never invent K.
+                output_info.width = frame.cols;
+                output_info.height = frame.rows;
+            }
+            if (flip_vertical) jzzj_image::flip_camera_info(output_info);
+            camera_info_pub.publish(output_info);
         
             if (visualize) {
                 cv::imshow(win_name, frame);

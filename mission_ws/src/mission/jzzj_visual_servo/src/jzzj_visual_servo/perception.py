@@ -52,7 +52,7 @@ def project_depth_to_rgb(depth, depth_k, rgb_k, depth_to_rgb, shape, scale):
     if not np.isfinite(scale) or scale<=0:
         raise ValueError('invalid depth scale')
     kd=np.asarray(depth_k,dtype=float).reshape(3,3);kr=np.asarray(rgb_k,dtype=float).reshape(3,3)
-    if not np.isfinite(kd).all() or not np.isfinite(kr).all() or min(kd[0,0],kd[1,1],kr[0,0],kr[1,1])<=0:
+    if not np.isfinite(kd).all() or not np.isfinite(kr).all() or any(abs(v)<=1e-12 for v in (kd[0,0],kd[1,1],kr[0,0],kr[1,1])):
         raise ValueError('invalid intrinsics')
     yy,xx=np.indices(depth.shape);z=depth.astype(float)*scale
     valid=np.isfinite(z)&(z>0)
@@ -88,7 +88,7 @@ class DetectorAdapter:
         if bgr.ndim!=3 or bgr.shape[2]!=3 or depth_m.shape!=bgr.shape[:2]:
             raise ValueError('RGB/depth shape mismatch')
         k=np.asarray(k,dtype=float).reshape(3,3)
-        if not np.isfinite(k).all() or min(k[0,0],k[1,1])<=0:
+        if not np.isfinite(k).all() or any(abs(v)<=1e-12 for v in (k[0,0],k[1,1])):
             raise ValueError('invalid RGB intrinsics')
         if not self.cfg['allowed_labels']:
             raise ValueError('explicit model label allowlist is required')

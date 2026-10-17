@@ -1,4 +1,5 @@
 wp_nav:
+  pose_timeout: 0.5 # seconds; stale/duplicate poses cannot keep navigation alive
   pid_x:
     kp: 0.3  #1.4
     ki: 0.015 # 0.04

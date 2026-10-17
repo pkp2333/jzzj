@@ -48,13 +48,13 @@ static int nms(int validCount, std::vector<float>& outputLocations, std::vector<
                int filterId, float threshold) {
 
     for (int i = 0; i < validCount; ++i) {
-        if (order[i] == -1 || classIds[i] != filterId) {
+        if (order[i] == -1 || classIds[order[i]] != filterId) {
         continue;
         }
         int n = order[i];
         for (int j = i + 1; j < validCount; ++j) {
         int m = order[j];
-        if (m == -1 || classIds[i] != filterId) {
+        if (m == -1 || classIds[m] != filterId) {
             continue;
         }
         float xmin0 = outputLocations[n * 4 + 0];
@@ -206,9 +206,13 @@ int post_process(int class_num,
                  float* anchor0, float* anchor1, float* anchor2,
                  float conf_threshold, float nms_threshold, 
                  float scale_w, float scale_h, std::vector<int32_t>& qnt_zps,
-                 std::vector<float>& qnt_scales, detect_result_group_t* group) {
+                 std::vector<float>& qnt_scales, detect_result_group_t* group,
+                 const std::vector<int>& species_map) {
 
     memset(group, 0, sizeof(detect_result_group_t));
+    if (!species_map.empty() && (species_map.size() != static_cast<size_t>(class_num)))
+        return -1;
+    for (int id : species_map) if (id < 0) return -1;
 
     std::vector<float> filterBoxes;
     std::vector<float> objProbs;
@@ -254,6 +258,10 @@ int post_process(int class_num,
 
     quick_sort_indice_inverse(objProbs, 0, validCount - 1, indexArray);
 
+    // Merge before NMS and the 64-result cap, so quality variants of the same
+    // fruit cannot duplicate a box or change its tracking identity.
+    if (!species_map.empty())
+        for (int& id : classId) id = species_map[id];
     std::set<int> class_set(std::begin(classId), std::end(classId));
 
     for (auto c : class_set) {

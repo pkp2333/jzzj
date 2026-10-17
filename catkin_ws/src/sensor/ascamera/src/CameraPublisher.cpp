@@ -12,6 +12,7 @@
 
 #include "CameraPublisher.h"
 #include "ros/ros.h"
+#include <user_msgs/image_orientation.h>
 
 #define LOG_PARA(value, str)\
     do { \
@@ -24,6 +25,7 @@
 CameraPublisher::CameraPublisher(ros::NodeHandle nh)
 {
     m_nh = nh;
+    m_nh.param("flip_vertical", m_flip_vertical, false);
 
     initLaunchParams();
     m_nodeNameSpace = m_nh.getNamespace();
@@ -848,6 +850,11 @@ void CameraPublisher::depthInfoPublisher(AS_CAM_PTR pCamera, const AS_SDK_Data_s
                 genRosDepthCamInfo(&pstData->depthImg, &stDepthCamInfo, seq, stParameter, it->config_info.is_Registration);
             }
             genRosDepthImage(&pstData->depthImg, &stDepthImage, seq);
+            if (m_flip_vertical) {
+                jzzj_image::flip_vertical(stDepthImage);
+                if (cam_type != AS_SDK_CAM_MODEL_KONDYOR)
+                    jzzj_image::flip_camera_info(stDepthCamInfo);
+            }
             if (ros::ok()) {
                 auto camIt = m_camera_map.find(pCamera);
                 if (camIt == m_camera_map.end()) {
@@ -1042,6 +1049,10 @@ void CameraPublisher::rgbInfoPublisher(AS_CAM_PTR pCamera, const AS_SDK_Data_s *
 
     genRosRgbCamInfo(&pstData->rgbImg, &stRgbCamInfo, seq, stParameter);
     genRosRgbImage(&pstData->rgbImg, &rgbImage, seq);
+    if (m_flip_vertical) {
+        jzzj_image::flip_vertical(rgbImage);
+        jzzj_image::flip_camera_info(stRgbCamInfo);
+    }
     if (m_launch_param.pub_mono8) {
         unsigned int img_width = pstData->rgbImg.width;
         unsigned int img_height = pstData->rgbImg.height;
@@ -1056,6 +1067,7 @@ void CameraPublisher::rgbInfoPublisher(AS_CAM_PTR pCamera, const AS_SDK_Data_s *
             mono8_frame.height = pstData->rgbImg.height;
             mono8_frame.size = pstData->rgbImg.width * pstData->rgbImg.height;
             genRosMono8Image(&mono8_frame, &mono8Image, seq);
+            if (m_flip_vertical) jzzj_image::flip_vertical(mono8Image);
         }
     }
     seq++;

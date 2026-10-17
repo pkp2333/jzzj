@@ -19,6 +19,8 @@
 
 #include <thread>
 #include <mutex>
+#include <atomic>
+#include <cstdint>
 
 
 class UsbCam {
@@ -33,7 +35,7 @@ public:
     image_transport::Publisher camera_image_pub;
     ros::Publisher camera_info_pub;
 
-    bool task = true;
+    std::atomic<bool> task{true};
     
     void init_node();
 
@@ -42,6 +44,8 @@ public:
 private:
     std::mutex g_mutex;
     cv::Mat g_newest_frame;
+    ros::Time g_newest_stamp;
+    uint64_t g_generation = 0;
     std::thread retrieve_thread;
 
     cv::VideoCapture cap;
@@ -59,6 +63,7 @@ private:
     std::string camera_info_path;
     std::string kill_switch_topic;
     bool visualize;
+    bool flip_vertical;
 
     void task_cb(const std_msgs::Bool::ConstPtr& msg);
 

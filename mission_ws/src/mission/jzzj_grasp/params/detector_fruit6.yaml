@@ -1,6 +1,8 @@
 {
   "image_topic_name": "/ascamera_hp60c/rgb0/image",
   "class_num": 6,
+  "species_map": [0, 1, 1, 0, 1, 0],
+  "species_labels": ["cherry", "lemon"],
   "anchors": [
     10.0,
     13.0,

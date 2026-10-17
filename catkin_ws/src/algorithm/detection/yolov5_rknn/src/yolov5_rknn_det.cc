@@ -225,6 +225,22 @@ int main(int argc, char** argv)
         for(const auto& x:labels_map) unique.insert(x.second);
         if(unique.size()!=labels_map.size()) throw std::runtime_error("duplicate labels");
     } catch(const std::exception& e) { ROS_ERROR("Invalid labels: %s", e.what()); return -1; }
+    std::vector<int> species_map;
+    std::vector<std::string> species_labels;
+    nh.getParam("species_map", species_map);
+    nh.getParam("species_labels", species_labels);
+    if (!species_map.empty() || !species_labels.empty()) {
+        std::set<std::string> names(species_labels.begin(), species_labels.end());
+        if (species_map.size() != static_cast<size_t>(class_num) || species_labels.empty() ||
+            names.size() != species_labels.size() || names.count("") ||
+            std::any_of(species_map.begin(), species_map.end(), [&](int id) {
+                return id < 0 || id >= static_cast<int>(species_labels.size());
+            })) {
+            ROS_ERROR("Invalid species_map/species_labels"); return -1;
+        }
+        labels_map.clear();
+        for (size_t i=0; i<species_labels.size(); ++i) labels_map[i]=species_labels[i];
+    }
     if (anchors.size()!=18 || std::any_of(anchors.begin(), anchors.end(), [](float a){return !std::isfinite(a)||a<=0;})) {
         ROS_ERROR("Expected 18 finite positive anchors"); return -1;
     }
@@ -495,7 +511,7 @@ int main(int argc, char** argv)
                          height, width,
                          (float*)anchor0, (float*)anchor1, (float*)anchor2,
                          ConfThresh, NmsThresh, 
-                         scale_w, scale_h, out_zps, out_scales, &detect_result_group);
+                         scale_w, scale_h, out_zps, out_scales, &detect_result_group, species_map);
 
             if(ret<0) {
                 ROS_ERROR("YOLO postprocess failed"); rknn_outputs_release(ctx, io_num.n_output, outputs); inference_failed=true; break;

@@ -36,7 +36,8 @@ int post_process(int class_num,
                  float conf_threshold, float nms_threshold, 
                  float scale_w, float scale_h,
                  std::vector<int32_t> &qnt_zps, std::vector<float> &qnt_scales,
-                 detect_result_group_t *group);
+                 detect_result_group_t *group,
+                 const std::vector<int>& species_map = {});
 
 void deinitPostProcess();
 #endif //_RKNN_ZERO_COPY_DEMO_POSTPROCESS_H_

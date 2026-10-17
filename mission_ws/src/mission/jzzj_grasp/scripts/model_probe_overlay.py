@@ -16,7 +16,8 @@ class Overlay:
     def __init__(self):
         self.lock=threading.RLock();self.rgb=deque(maxlen=90);self.pending=deque(maxlen=20)
         self.bridge=CvBridge();self.gate=FrameGate(rospy.get_param('~max_age',.5))
-        self.last_frame=None;self.last_received=None;self.last_output=None;self.started=__import__('time').monotonic();self.labels=['fruit-'+str(i) for i in range(1,7)]
+        self.last_frame=None;self.last_received=None;self.last_output=None;self.started=__import__('time').monotonic()
+        self.labels=rospy.get_param('~species_labels',['cherry','lemon'])
         self.image_pub=rospy.Publisher('/stage_c/model_probe/image',Image,queue_size=1)
         from diagnostic_msgs.msg import DiagnosticArray,DiagnosticStatus,KeyValue
         self.diag_types=(DiagnosticArray,DiagnosticStatus,KeyValue)
@@ -30,7 +31,7 @@ class Overlay:
         Array,Status,Value=self.diag_types
         array=Array();array.header.stamp=rospy.Time.now()
         s=Status();s.name='stage_c/fruit6_model_probe';s.level=level;s.message=message
-        s.values=[Value(key='semantic_mapping',value='UNCONFIRMED; fruit-1..fruit-6'),
+        s.values=[Value(key='semantic_mapping',value=','.join(self.labels)),
                   Value(key='motion_enabled',value='false')]
         array.status=[s];self.status_pub.publish(array)
 
@@ -71,7 +72,7 @@ class Overlay:
             if det.num!=len(det.dets):raise ValueError('num/array count mismatch')
             h,w=frame.shape[:2]
             for item in det.dets:
-                if item.class_id>=6 or item.label!=self.labels[item.class_id]:raise ValueError('class/neutral label mismatch')
+                if not 0<=item.class_id<len(self.labels) or item.label!=self.labels[item.class_id]:raise ValueError('class/label mismatch')
                 values=(item.bbox.x1,item.bbox.y1,item.bbox.x2,item.bbox.y2,item.score)
                 if not all(math.isfinite(v) for v in values) or not 0<=item.score<=1:raise ValueError('nonfinite detection')
                 x1,y1,x2,y2=values[:4]
@@ -80,7 +81,7 @@ class Overlay:
                 x2,y2=max(0,min(w-1,int(x2))),max(0,min(h-1,int(y2)))
                 cv2.rectangle(frame,(x1,y1),(x2,y2),(0,255,0),2)
                 cv2.putText(frame,'%s %.3f #%d'%(item.label,item.score,item.index),(x1,max(15,y1-4)),cv2.FONT_HERSHEY_SIMPLEX,.45,(0,255,0),1)
-            cv2.putText(frame,'fruit6 probe: %d detections; semantics unconfirmed'%len(det.dets),(8,h-10),cv2.FONT_HERSHEY_SIMPLEX,.45,(255,180,0),1)
+            cv2.putText(frame,'fruit species: %d detections'%len(det.dets),(8,h-10),cv2.FONT_HERSHEY_SIMPLEX,.45,(255,180,0),1)
             result=self.bridge.cv2_to_imgmsg(frame,'bgr8');result.header=image.header;self.image_pub.publish(result)
             self.status(0,'fresh source frame; '+str(len(det.dets))+' detections')
         except Exception as exc:
