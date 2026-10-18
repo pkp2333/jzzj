@@ -8,6 +8,7 @@ from jzzj_grasp_interfaces.msg import (VisualGraspAction, VisualGraspResult, Vis
     StageCContext, TargetSelection, TargetObservations)
 from jzzj_grasp.core import Engine, Store, Context, Observation, CODES, validate_config
 from jzzj_grasp.backends import SimBackend, RosArmBackend
+from jzzj_grasp.execution_lease import ExecutionLease
 
 class Server:
     def __init__(self):
@@ -16,6 +17,7 @@ class Server:
         validate_config(self.cfg)
         self.store=Store();self.lock=threading.RLock();self.active=None;self.engine=None;self.worker=None
         self.poisoned=False;self.used_sessions=set();self.holding_latched=False
+        self.execution_lease=None;self.lease_factory=ExecutionLease
         self.publish_latches()
         self.backend=SimBackend(self.store,self.cfg,lambda:rospy.Time.now().to_sec()) if self.kind=='sim' else RosArmBackend(self.cfg)
         self.selection=rospy.Publisher('/stage_c/selection',TargetSelection,queue_size=1,latch=True)
@@ -58,6 +60,8 @@ class Server:
     def goal_cb(self,gh):
         from jzzj_grasp.core import Failure
         with self.lock:
+            if rospy.get_param('/stage_c/taught/recovery_required',False):
+                self.reject(gh,'taught session requires operator stop/hand recovery');return
             if self.active is not None or self.poisoned or getattr(self,'holding_latched',False):
                 self.reject(gh,'busy, holding/unknown object or STOP_FAILED; clear handoff and operator restart required');return
             g=gh.get_goal();cfg=copy.deepcopy(self.cfg)
@@ -69,8 +73,12 @@ class Server:
             self.backend.cfg=cfg
             e=Engine(self.backend,self.store,cfg,now=lambda:rospy.Time.now().to_sec(),feedback=lambda *a:self.feedback(gh,*a))
             e.session=g.session_id;e.deadline=time.monotonic()+g.timeout.to_sec()
-            try:e.guard();self.backend.ready(e.guard)
-            except Exception as exc:self.reject(gh,str(exc));return
+            try:
+                self.execution_lease=self.lease_factory()
+                e.guard();self.backend.ready(e.guard)
+            except Exception as exc:
+                if self.execution_lease:self.execution_lease.close();self.execution_lease=None
+                self.reject(gh,str(exc));return
             self.active=gh;self.engine=e
             self.used_sessions.add(g.session_id)
             gh.set_accepted('stage C accepted')
@@ -91,6 +99,8 @@ class Server:
             elif o.code=='CANCELED':gh.set_canceled(self.result(o))
             else:gh.set_aborted(self.result(o))
             with self.lock:self.active=self.engine=None
+            if not self.poisoned and not self.holding_latched and self.execution_lease:
+                self.execution_lease.close();self.execution_lease=None
         except Exception as exc:
             rospy.logerr('stage C worker failed: %s',exc)
             with self.lock:self.poisoned=True

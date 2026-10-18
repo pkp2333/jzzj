@@ -1,0 +1,19 @@
+{
+  "version": 1,
+  "units": "rad",
+  "arm_frame": "arm_left/arm_base_link",
+  "real_motion_enabled": false,
+  "workspace_clear_confirmed": false,
+  "table_height_confirmed": false,
+  "base_calibrated": false,
+  "table_normal": [0.0, 0.0, 1.0],
+  "reference_position_m": null,
+  "identity": {"color": "yellow"},
+  "bindings": {},
+  "base_matrix": null,
+  "base_calibration_samples": [],
+  "start_rad": [],
+  "steps": [],
+  "empty_validation": {},
+  "notes": "Record measured poses; never copy failed IK paths. Same table height required."
+}

@@ -64,6 +64,7 @@ class ServerTests(unittest.TestCase):
         self.s=server.Server.__new__(server.Server);self.s.lock=threading.RLock();self.s.active=None
         self.s.poisoned=False;self.s.used_sessions=set();self.s.cfg=CFG;self.s.backend=DummyBackend()
         self.s.holding_latched=False
+        self.s.execution_lease=None;self.s.lease_factory=lambda:Message(close=lambda:None)
         self.s.store=Store();self.s.store.context=Context(100.,'session',True,True,False,time.monotonic())
         self.s.selection=Publisher();self.s.engine=None
         self.goal=Message(session_id='session',target_color='red',grasp_profile='tabletop',timeout=Duration(30.))
@@ -73,6 +74,14 @@ class ServerTests(unittest.TestCase):
         h=Handle(self.goal);self.accept(h);self.assertEqual(h.status,'accepted')
         self.assertTrue(self.s.selection.sent[-1].enabled)
         second=Handle(self.goal,'other');self.accept(second);self.assertEqual(second.status,'rejected')
+    def test_taught_entry_lease_rejects_normal_grasp_before_acceptance(self):
+        def busy():raise RuntimeError('taught entry owns execution')
+        self.s.lease_factory=busy;h=Handle(self.goal);self.accept(h)
+        self.assertEqual(h.status,'rejected');self.assertFalse(self.s.selection.sent)
+    def test_taught_pending_operator_recovery_also_blocks_after_process_exit(self):
+        with patch.object(server.rospy,'get_param',return_value=True):
+            h=Handle(self.goal);self.accept(h)
+        self.assertEqual(h.status,'rejected');self.assertFalse(self.s.selection.sent)
     def test_replay_rejected(self):
         self.s.used_sessions.add('session');h=Handle(self.goal);self.accept(h)
         self.assertEqual(h.status,'rejected')

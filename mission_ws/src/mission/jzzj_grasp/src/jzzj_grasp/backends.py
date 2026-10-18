@@ -226,17 +226,26 @@ class RosArmBackend:
                                       'MOVE_TO_TRANSPORT_POSE',floor)
         self.execute_plan(planner,points,start,guard,feedback)
 
-    def trajectory(self,positions,guard):
+    def trajectory(self,positions,guard,seconds=None):
         from control_msgs.msg import FollowJointTrajectoryGoal
         from trajectory_msgs.msg import JointTrajectoryPoint
         guard()
         if not finite_vector(positions,6):raise Failure('MOTION_FAILED','invalid joint solution')
         g=FollowJointTrajectoryGoal();g.trajectory.joint_names=self.cfg['joint_names']
-        p=JointTrajectoryPoint();p.positions=positions;p.time_from_start=self.rospy.Duration(self.cfg['motion_seconds'])
+        seconds=self.cfg['motion_seconds'] if seconds is None else seconds
+        if isinstance(seconds,bool) or not isinstance(seconds,(int,float)) or not math.isfinite(seconds) or not .2<=seconds<=5.:
+            raise Failure('MOTION_FAILED','trajectory duration must be 0.2..5 seconds')
+        p=JointTrajectoryPoint();p.positions=positions;p.time_from_start=self.rospy.Duration(seconds)
         g.trajectory.points=[p];g.goal_time_tolerance=self.rospy.Duration(self.cfg['arrival_timeout'])
+        stop=self.rospy.get_param('/arm_left/arm_trajectory/stop_timeout',3.)
+        fresh=self.rospy.get_param('/arm_left/arm_trajectory/feedback_timeout',1.5)
+        if not all(isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v) and v>0 for v in (stop,fresh)):
+            raise Failure('NOT_READY','invalid driver result/hold timeout parameters')
         self.client.send_goal(g)
         self.sent=True
-        end=time.monotonic()+self.cfg['motion_seconds']+self.cfg['arrival_timeout']+1.
+        # Driver terminal failure includes arrival wait PLUS a measured hold.
+        # Cover two serialized I/O scans without relaxing arrival acceptance.
+        end=time.monotonic()+seconds+max(1.,self.cfg['arrival_timeout'])+stop+2*fresh+1.
         while self.client.get_state() in (0,1,6,7):
             guard()
             if time.monotonic()>end:raise Failure('MOTION_FAILED','trajectory result timeout')
