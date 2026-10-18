@@ -5,6 +5,8 @@ from pathlib import Path
 import sys
 import types
 import unittest
+import ast
+import xml.etree.ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[5]
 sys.path.insert(0, str(ROOT/'catkin_ws/src/actuator/arm/scripts'))
@@ -111,6 +113,29 @@ class PreflightTests(unittest.TestCase):
         p={k.replace('/arm_left/arm_trajectory/', '/arm_left/arm_trajectory_node/'):v for k,v in self.params.items()}
         with self.assertRaisesRegex(ValueError, 'private parameter'):
             preflight.validate_launch_parameters(p)
+
+    def test_launch_driver_backend_and_readiness_share_canonical_name(self):
+        launch=ET.parse(ROOT/'mission_ws/src/mission/jzzj_grasp/launch/stage_c.launch')
+        node=next(n for n in launch.iter('node') if n.get('type')=='arm_trajectory_node.py')
+        prefix='/'+node.get('ns')+'/'+node.get('name')+'/'
+        driver=ast.parse((ROOT/'catkin_ws/src/actuator/arm/scripts/arm_trajectory_node.py').read_text(encoding='utf-8'))
+        defaults=[n.args[0].value for n in ast.walk(driver) if isinstance(n,ast.Call) and
+                  isinstance(n.func,ast.Attribute) and n.func.attr=='init_node']
+        self.assertEqual(defaults,[node.get('name')])
+        backend=ast.parse((ROOT/'mission_ws/src/mission/jzzj_grasp/src/jzzj_grasp/backends.py').read_text(encoding='utf-8'))
+        limits=[n.args[0].value for n in ast.walk(backend) if isinstance(n,ast.Call) and
+                isinstance(n.func,ast.Attribute) and n.func.attr=='get_param' and n.args and
+                isinstance(n.args[0],ast.Constant) and 'joint_' in str(n.args[0].value)]
+        self.assertEqual(set(limits),{prefix+'joint_lower_rad',prefix+'joint_upper_rad'})
+        self.assertIn(prefix+'servo_signs',self.params)
+
+    def test_residual_legacy_parameters_cannot_replace_canonical_parameters(self):
+        stale={k.replace('/arm_left/arm_trajectory/','/arm_left/arm_trajectory_node/'):v for k,v in self.params.items()}
+        stale['/arm_left/arm_trajectory_node/servo_position_min']=0
+        both=dict(stale,**self.params)
+        preflight.validate_launch_parameters(both)
+        del both['/arm_left/arm_trajectory/servo_signs']
+        with self.assertRaisesRegex(ValueError,'servo_signs'):preflight.validate_launch_parameters(both)
 
     def test_legacy_configuration_without_servo_mapping_is_rejected(self):
         del self.params['/arm_left/arm_trajectory/servo_signs']

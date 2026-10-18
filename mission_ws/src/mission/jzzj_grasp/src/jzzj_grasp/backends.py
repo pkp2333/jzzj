@@ -157,8 +157,11 @@ class RosArmBackend:
                 raise Failure('MOTION_FAILED','IK joint mapping mismatch')
             values=dict(zip(r.solution.name,r.solution.position))
             return tuple(values[n] for n in self.cfg['joint_names'])
-        lower=self.rospy.get_param('/arm_left/arm_trajectory/joint_lower_rad')
-        upper=self.rospy.get_param('/arm_left/arm_trajectory/joint_upper_rad')
+        try:
+            lower=self.rospy.get_param('/arm_left/arm_trajectory/joint_lower_rad')
+            upper=self.rospy.get_param('/arm_left/arm_trajectory/joint_upper_rad')
+        except KeyError as exc:
+            raise Failure('NOT_READY','canonical /arm_left/arm_trajectory limits absent; use tools/stage_c/start_control.sh real') from exc
         return PathPlanner(self.cfg,lower,upper,forward,inverse,guard)
 
     def preflight(self,surface,profile,guard,remaining=False):

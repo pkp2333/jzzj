@@ -7,10 +7,11 @@ FEEDBACK_POSITION_MIN = 0
 FEEDBACK_POSITION_MAX = 4096
 
 
-def validate_position_range(lower, upper):
+def validate_position_range(lower, upper, feedback=False):
+    minimum,maximum=(FEEDBACK_POSITION_MIN,FEEDBACK_POSITION_MAX) if feedback else (POSITION_MIN,POSITION_MAX)
     if (type(lower) is not int or type(upper) is not int or
-            not POSITION_MIN <= lower < upper <= POSITION_MAX):
-        raise ValueError('servo position range must be inside 96..4000')
+            not minimum <= lower < upper <= maximum):
+        raise ValueError('servo position range must be inside {}..{}'.format(minimum,maximum))
 
 
 def validate_positions(values, lower=POSITION_MIN, upper=POSITION_MAX):
@@ -57,8 +58,8 @@ def duration_bytes(milliseconds):
     return [(milliseconds >> 8) & 255, milliseconds & 255]
 
 
-def joint_limits(signs, offsets, lower=POSITION_MIN, upper=POSITION_MAX, left=True):
-    validate_position_range(lower, upper)
+def joint_limits(signs, offsets, lower=POSITION_MIN, upper=POSITION_MAX, left=True, feedback=False):
+    validate_position_range(lower, upper, feedback=feedback)
     if (len(signs) != 6 or len(offsets) != 6 or any(s not in (-1, 1) for s in signs) or
             not all(math.isfinite(v) for v in offsets)):
         raise ValueError('six calibrated signs and offsets required')

@@ -37,6 +37,7 @@ class Handle:
 rospy=types.ModuleType('rospy');rospy.Duration=Duration
 rospy.Time=types.SimpleNamespace(now=lambda:Duration(100.))
 rospy.logerr=lambda *args:None;rospy.logwarn=lambda *args:None
+rospy.logerr_throttle=lambda *args:None;rospy.logwarn_throttle=lambda *args:None
 rospy.get_param=lambda name,default=None:default
 rospy.set_param=lambda *args:None
 rospy.get_time=lambda:100.
@@ -168,6 +169,7 @@ class DriverContractTests(unittest.TestCase):
         self.d=self.module.TrajectoryDriver.__new__(self.module.TrajectoryDriver)
         self.d.lock=threading.RLock();self.d.active=None;self.d.poisoned=False;self.d.cancel=threading.Event()
         self.d.names=['joint'+str(i) for i in range(1,7)];self.d.lower=[-2]*6;self.d.upper=[2]*6
+        self.d.fb_lower=[-3]*6;self.d.fb_upper=[5]*6
         self.d.tolerance=.035;self.d.stop_timeout=1.;self.d.settle_delta=.01
         self.d.sample=lambda:([0.]*6,0)
         point=Message(positions=[0.]*6,velocities=[],accelerations=[],effort=[],time_from_start=Duration(.8))
@@ -238,7 +240,7 @@ class DriverContractTests(unittest.TestCase):
         self.assertFalse(self.d.converged([0]*6,time.monotonic()+.08,[.035]*6,False))
     def test_feedback_timestamp_covers_oldest_sequential_read(self):
         self.d.io=threading.RLock();self.d.signs=[1]*6;self.d.offsets=[0]*6
-        self.d.raw_lower=[-100]*6;self.d.raw_upper=[100]*6;self.d.sequence=0
+        self.d.sequence=0
         self.d.read_period=.1;self.d.pub=Publisher()
         self.d.device=Message(Arm_serial_servo_read=lambda _:0.)
         with patch.object(self.module,'JointState',lambda:Message(header=Message())), \
@@ -250,7 +252,7 @@ class DriverContractTests(unittest.TestCase):
         self.assertEqual(self.d.sequence,1)
         self.assertEqual(self.d.pub.sent[0].header.stamp.to_sec(),100.)
     def test_failed_feedback_does_not_refresh_old_state(self):
-        self.d.io=threading.RLock();self.d.raw_lower=[-100]*6;self.d.raw_upper=[100]*6
+        self.d.io=threading.RLock()
         self.d.sequence=7;self.d.received=1.;self.d.current=[.1]*6
         self.d.device=Message(Arm_serial_servo_read=lambda _:None)
         with patch.object(self.module.rospy,'logerr_throttle',lambda *a:None,create=True):
@@ -258,5 +260,56 @@ class DriverContractTests(unittest.TestCase):
         self.assertEqual(self.d.sequence,7)
         self.assertEqual(self.d.received,1.)
         self.assertEqual(self.d.current,[.1]*6)
+
+    def test_startup_checks_real_read_hold_and_torque_order(self):
+        from servo_protocol import joint_limits, position_to_angle
+        from checked_arm_sdk import CommandResult
+        for raw in (0,95,96,2040,4000,4001,4096):
+            with self.subTest(raw=raw):
+                d=self.module.TrajectoryDriver.__new__(self.module.TrajectoryDriver)
+                d.io=threading.RLock();d.lock=threading.RLock()
+                d.names=self.d.names;d.signs=[1,-1,1,1,1,1];d.offsets=[0]*6
+                d.lower,d.upper=joint_limits(d.signs,d.offsets)
+                d.fb_lower,d.fb_upper=joint_limits(d.signs,d.offsets,0,4096,feedback=True)
+                d.current=None;d.sequence=0;d.received=0.;d.freshness=1.5;d.read_period=.1;d.pub=Publisher()
+                events=[]
+                def read(jid):
+                    events.append(('read',jid))
+                    return position_to_angle(jid,raw if jid==5 else 2040)
+                d.device=Message(Arm_serial_servo_read=read,Arm_serial_set_torque=lambda value:events.append(('torque',value)))
+                d.write=lambda *args:events.append(('hold',)) or CommandResult(tuple(range(1,7)),())
+                with patch.object(self.module,'JointState',lambda:Message(header=Message())):
+                    if 96<=raw<=4000:
+                        d.initialize_hardware()
+                        self.assertEqual(events[6:8],[('hold',),('torque',1)])
+                        self.assertEqual(d.sequence,2)
+                    else:
+                        with self.assertRaises(ValueError):d.initialize_hardware()
+                        self.assertEqual(len(events),6)  # No hold packet or torque.
+                        self.assertEqual(d.sequence,1)  # Still valid receive data.
+
+    def test_partial_startup_hold_never_enables_torque(self):
+        from checked_arm_sdk import CommandResult
+        from unittest.mock import Mock
+        self.d.io=threading.RLock();self.d.device=Message(Arm_serial_set_torque=Mock())
+        self.d.read=lambda:True
+        self.d.write=lambda *a:CommandResult((1,2,3,4,6),(5,))
+        with self.assertRaisesRegex(RuntimeError,'startup hold incomplete'):self.d.initialize_hardware()
+        self.d.device.Arm_serial_set_torque.assert_not_called()
+
+    def test_failed_initial_scan_never_writes_or_enables(self):
+        from unittest.mock import Mock
+        self.d.read=lambda:False;self.d.write=Mock();self.d.device=Mock()
+        with self.assertRaisesRegex(RuntimeError,'cannot read all six'):self.d.initialize_hardware()
+        self.d.write.assert_not_called();self.d.device.Arm_serial_set_torque.assert_not_called()
+
+    def test_post_enable_read_failure_is_not_ready(self):
+        from checked_arm_sdk import CommandResult
+        from unittest.mock import Mock
+        self.d.io=threading.RLock();self.d.device=Mock()
+        self.d.read=Mock(side_effect=[True,False])
+        self.d.write=lambda *a:CommandResult(tuple(range(1,7)),())
+        with self.assertRaisesRegex(RuntimeError,'post-enable feedback failed'):self.d.initialize_hardware()
+        self.d.device.Arm_serial_set_torque.assert_called_once_with(1)
 
 if __name__=='__main__':unittest.main()

@@ -11,7 +11,7 @@ import actionlib
 from sensor_msgs.msg import JointState
 from control_msgs.msg import (FollowJointTrajectoryAction,FollowJointTrajectoryResult,FollowJointTrajectoryFeedback)
 from trajectory_safety import validate_mapping,validate_target,encode,decode
-from servo_protocol import joint_limits
+from servo_protocol import joint_limits, FEEDBACK_POSITION_MIN, FEEDBACK_POSITION_MAX
 
 class TrajectoryDriver:
     def __init__(self):
@@ -23,6 +23,8 @@ class TrajectoryDriver:
         self.position_min=rospy.get_param('~servo_position_min',96)
         self.position_max=rospy.get_param('~servo_position_max',4000)
         self.lower,self.upper=joint_limits(self.signs,self.offsets,self.position_min,self.position_max,left=True)
+        self.fb_lower,self.fb_upper=joint_limits(self.signs,self.offsets,
+            FEEDBACK_POSITION_MIN,FEEDBACK_POSITION_MAX,left=True,feedback=True)
         validate_mapping(self.signs,self.offsets,self.lower,self.upper)
         # Runtime diagnostics for the planner; the six servo limits have one
         # source of truth in raw position units, not a second degree table.
@@ -47,19 +49,28 @@ class TrajectoryDriver:
         self.device=CheckedArmDevice(lr='left',position_min=self.position_min,position_max=self.position_max)
         self.read_duration=0.
         self.pub=rospy.Publisher('/arm_left/joint_states',JointState,queue_size=1)
-        self.read()
-        if self.current is None:raise RuntimeError('cannot read all six servos before enabling torque')
+        self.initialize_hardware()
         rospy.on_shutdown(self.shutdown)
-        self.write(self.current,.25)
-        with self.io:self.device.Arm_serial_set_torque(1)
-        # Torque setup may block in the vendor SDK; obtain a new complete frame
-        # before accepting trajectories instead of reusing the pre-enable sample.
-        if not self.read():raise RuntimeError('cannot refresh feedback after torque setup')
-        self.sample()
         self.timer=rospy.Timer(rospy.Duration(self.read_period),lambda _:self.read())
         self.server=actionlib.ActionServer('/arm_left/follow_joint_trajectory',FollowJointTrajectoryAction,
             self.goal,self.cancel_goal,auto_start=False)
         self.server.start()
+
+    def initialize_hardware(self):
+        if not self.read():raise RuntimeError('cannot read all six servos before enabling torque')
+        # The receive domain is wider than the command domain. Never enable the
+        # whole arm if even one current pose cannot be sent as a holding target.
+        q,_=self.sample()
+        validate_target(self.names,q,self.names,self.lower,self.upper)
+        report=self.write(q,.25)
+        if report is None or not report.complete:
+            raise RuntimeError('startup hold incomplete; torque not enabled')
+        with self.io:self.device.Arm_serial_set_torque(1)
+        # A bus write acknowledges transport, not physical torque or fresh UART
+        # feedback. No Action server is exposed until a full new scan succeeds.
+        if not self.read():
+            raise RuntimeError('post-enable feedback failed; arm not ready, physical stop/torque state must be checked')
+        self.sample()
 
     def read(self):
         try:
@@ -69,7 +80,7 @@ class TrajectoryDriver:
             if any(v is None or not math.isfinite(v) for v in raw):
                 raise ValueError('invalid SDK feedback')
             q=decode(raw,self.signs,self.offsets)
-            validate_target(self.names,q,self.names,self.lower,self.upper)
+            validate_target(self.names,q,self.names,self.fb_lower,self.fb_upper)
             elapsed=time.monotonic()-started
             with self.lock:
                 self.current=q;self.received=started;self.sequence+=1;self.read_duration=elapsed
@@ -188,4 +199,4 @@ class TrajectoryDriver:
         elif not self.hold():rospy.logerr('STOP_FAILED on driver shutdown; use physical emergency stop')
 
 if __name__=='__main__':
-    rospy.init_node('arm_trajectory_node');TrajectoryDriver();rospy.spin()
+    rospy.init_node('arm_trajectory');TrajectoryDriver();rospy.spin()
