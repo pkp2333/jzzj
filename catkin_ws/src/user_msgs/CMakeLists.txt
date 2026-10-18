@@ -58,6 +58,8 @@ add_message_files(
   GrabCmd.msg
   GrabFlag.msg
   CarCmd.msg
+  StageCBaseCommand.msg
+  StageCBaseStatus.msg
   ExitCondition.msg
   GimbalPoseDeg.msg
   ObjBbox.msg

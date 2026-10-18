@@ -1,12 +1,26 @@
-#!/home/orangepi/miniconda3/envs/rknn/bin/python
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import time
 import serial
+import threading
+import math
+import os
+import sys
+from functools import wraps
+sys.path.insert(0,os.path.dirname(os.path.abspath(__file__)))
+from stage_c_base_safety import BaseLease
 
 import rospy
 from std_msgs.msg import Bool
 from geometry_msgs.msg import Twist
 from user_msgs.msg import CarCmd
+
+
+def serialized(method):
+    @wraps(method)
+    def call(self,*args,**kwargs):
+        with self.io_lock:return method(self,*args,**kwargs)
+    return call
 
 
 def threshold(x, dead_zone=0, activate_zone=0, clamp=0):
@@ -20,6 +34,12 @@ def threshold(x, dead_zone=0, activate_zone=0, clamp=0):
 
 class ChassisNode:
     def __init__(self) -> None:
+        self.io_lock=threading.RLock()
+        self.micro=BaseLease(
+            enabled=rospy.get_param('~stage_c_micro/enabled',False),
+            calibrated=rospy.get_param('~stage_c_micro/calibrated',False),
+            watchdog_verified=rospy.get_param('~stage_c_micro/controller_watchdog_verified',False))
+        self.micro_stop_written=False
         print()
         rospy.loginfo(f"底盘节点初始化中...\n")
 
@@ -56,7 +76,7 @@ class ChassisNode:
         self.delled = False
         
         try:
-            self.ser = serial.Serial(port=serial_port, baudrate=serial_baudrate, timeout=None)  # 打开串口
+            self.ser = serial.Serial(port=serial_port, baudrate=serial_baudrate, timeout=None, write_timeout=.1)
         except Exception as e:
             print(e)
             exit(f"tty串口 {serial_port} @ 波特率-{serial_baudrate} 打开失败")
@@ -84,6 +104,11 @@ class ChassisNode:
         self.car_task_sub = rospy.Subscriber("/task", Bool, self.task_cb)
         self.car_cmd_sub = rospy.Subscriber("/car_cmd", CarCmd, self.car_cmd_cb)
         self.cmd_vel_sub = rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_cb) 
+        if rospy.get_param('~stage_c_micro/enabled',False):
+            from user_msgs.msg import StageCBaseCommand, StageCBaseStatus
+            self.micro_status_type=StageCBaseStatus
+            self.micro_pub=rospy.Publisher('/stage_c/base/status',StageCBaseStatus,queue_size=1)
+            self.micro_sub=rospy.Subscriber('/stage_c/base/command',StageCBaseCommand,self.micro_cb,queue_size=1)
         
         self.controller_timer = rospy.Timer(rospy.Duration(0.05), self.controller)
         
@@ -91,6 +116,7 @@ class ChassisNode:
 
         rospy.loginfo(f"底盘控制启动成功\n")
     
+    @serialized
     def shutdown(self):
         if not self.delled and self.ser and self.ser.is_open:
             cmd_data = self.head + [self.disarm & 0xff] + [0x00, 0x00, 0x00] + self.tail
@@ -127,13 +153,24 @@ class ChassisNode:
             data_body.append(data[i] & 0xff)  # 低8位
         return data_body
     
+    @serialized
     def task_cb(self, msg:Bool):
-        time.sleep(1)
+        if not msg.data:
+            with self.io_lock:
+                self.micro.fault('task stop requested');self.clear_motion()
+                self.ser.write(self.stop_data)
         self.task = msg.data
         if not self.task:
             rospy.logwarn("关闭底盘控制\n")
         
+    @serialized
     def car_cmd_cb(self, msg:CarCmd):
+        with self.io_lock:
+            if msg.cmd in (CarCmd.HOLD,CarCmd.ARRIVE):
+                self.micro.fault('external stop requested');self.clear_motion()
+                self.ser.write(self.stop_data)
+            elif self.micro.owner:
+                return  # Includes basket commands: no shared-serial interference.
         self.car_cmd = msg.cmd
 
         if self.car_cmd == CarCmd.OpenGate:
@@ -163,7 +200,14 @@ class ChassisNode:
             self.ser.write(self.basket_data)
 
         
+    @serialized
     def cmd_vel_cb(self, msg:Twist):
+        with self.io_lock:
+            if self.micro.owner:
+                if all(v==0 for v in (msg.linear.x,msg.linear.y,msg.angular.z)):
+                    self.micro.fault('external zero velocity stop');self.clear_motion()
+                    self.ser.write(self.stop_data)
+                return
         # cmd_vel = [msg.cmd_vel.linear.x, msg.cmd_vel.linear.y, msg.cmd_vel.angular.z * self.RA2DE]
         # if cmd_vel != self.last_cmd_vel:
         #     # print(f"\ncurrently:\tx线速 {round(cmd_vel[0], 2)}\t " \
@@ -191,6 +235,27 @@ class ChassisNode:
         body = self.gen_body(vel)
         self.chassis_cmd_data = self.head + [self.vel_mode & 0xff] + body + self.tail
 
+    def clear_motion(self):
+        self.chassis_cmd_data=list(self.stop_data)
+        self.last_chassis_cmd_data=list(self.stop_data)
+        self.car_cmd=CarCmd.HOLD
+
+    def micro_cb(self, msg):
+        with self.io_lock:
+            try:
+                age=(rospy.Time.now()-msg.header.stamp).to_sec()
+                if not math.isfinite(age) or not -.05<=age<=.3:raise ValueError('stale micro command')
+                stopped=self.car_cmd in (CarCmd.HOLD,CarCmd.ARRIVE)
+                self.micro.accept(msg.session_id,msg.command_id,msg.operation,msg.vx,msg.vy,
+                                  time.monotonic(),stopped and self.task,msg.operator_confirmed)
+                self.micro_stop_written=False
+                if not self.micro.owner:self.clear_motion();self.ser.write(self.stop_data)
+            except ValueError as exc:
+                # Malformed commands from the owner fail closed; other sessions
+                # cannot take ownership or renew its watchdog.
+                if msg.session_id==self.micro.owner:self.micro.fault(str(exc))
+                rospy.logwarn_throttle(1.,'stage C base rejected: %s',exc)
+
 
     def basket_control(self, test: bool, position):
         if position == 0:
@@ -214,12 +279,37 @@ class ChassisNode:
         self.basket_data = self.head + [self.basket_mode & 0xff] + body + self.tail
 
 
+    def publish_micro_status(self):
+        if hasattr(self,'micro_pub'):
+            m=self.micro_status_type();m.header.stamp=rospy.Time.now();m.session_id=self.micro.owner
+            m.command_id=self.micro.command_id;m.phase=self.micro.phase
+            m.serial_stop_written=self.micro_stop_written;m.diagnostic=self.micro.diagnostic
+            self.micro_pub.publish(m)
+
+    @serialized
     def controller(self, *args):
+        if self.delled:return
+        with self.io_lock:
+            if self.micro.owner:
+                vx,vy=self.micro.tick(time.monotonic())
+                if not self.task:self.micro.fault('task disabled');vx=vy=0.
+                data=self.stop_data if vx==0 and vy==0 else self.head+[self.vel_mode]+self.gen_body(
+                    [-int(vy*self.vel_2_0x40),-int(vx*self.vel_2_0x40),0])+self.tail
+                try:
+                    if self.ser.write(data)!=len(data):raise IOError('short chassis serial write')
+                    self.micro_stop_written=data==self.stop_data
+                except Exception as exc:
+                    self.micro.fault('serial write failed: '+str(exc));self.micro_stop_written=False
+                self.chassis_cmd_data=list(self.stop_data);self.last_chassis_cmd_data=list(self.stop_data)
+                self.publish_micro_status()
+                return
+            self.publish_micro_status()
         if not self.task or self.delled:
             return
         
         if self.car_cmd == CarCmd.HOLD or self.car_cmd == CarCmd.ARRIVE:
             self.ser.write(self.stop_data)
+            self.chassis_cmd_data=list(self.stop_data)
             self.last_chassis_cmd_data = self.stop_data
             return
 

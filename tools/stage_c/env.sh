@@ -11,7 +11,7 @@ for workspace in catkin_ws mission_ws; do
   fi
   source "$JZZJ_ROOT/$workspace/devel/setup.bash"
 done
-for package in arm jzzj_grasp jzzj_grasp_interfaces jzzj_visual_servo jzzj_misson; do
+for package in arm chassis user_msgs user_params jzzj_grasp jzzj_grasp_interfaces jzzj_visual_servo jzzj_misson; do
   package_path="$(rospack find "$package")" || return 1
   case "$package_path" in "$JZZJ_ROOT"/*) ;; *) echo "包路径冲突: $package -> $package_path" >&2; return 1;; esac
 done

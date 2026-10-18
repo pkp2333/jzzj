@@ -1,5 +1,6 @@
 cmake_minimum_required(VERSION 3.0.2)
 project(user_params)
+install(DIRECTORY params DESTINATION share/${PROJECT_NAME})
 
 ## Compile as C++11, supported in ROS Kinetic and newer
 # add_compile_options(-std=c++11)

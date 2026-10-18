@@ -1,0 +1,4 @@
+stage_c_micro:
+  enabled: false
+  calibrated: false
+  controller_watchdog_verified: false

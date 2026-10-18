@@ -1,0 +1,7 @@
+<launch>
+  <arg name="micro_config" default="$(find chassis)/params/stage_c_micro.example.yaml"/>
+  <rosparam command="load" file="$(find user_params)/params/chassis_config.yaml"/>
+  <node pkg="chassis" type="chassis_control_node.py" name="chassis" output="screen">
+    <rosparam command="load" file="$(arg micro_config)"/>
+  </node>
+</launch>
