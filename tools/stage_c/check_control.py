@@ -33,6 +33,15 @@ def validate_launch_parameters(params):
             raise ValueError('missing real execution confirmation: ' + key)
     if params.get('/stage_c_kinematics/calibration_confirmed') is not True:
         raise ValueError('kinematics calibration not confirmed')
+    # An accepted IK solution must still satisfy the task's final precision.
+    # Tighten the solver/configuration contract, never widen task limits to pass.
+    for solver_key,task_key,default in (
+            ('max_position_residual_m','position_tolerance',.003),
+            ('max_orientation_residual_rad','orientation_tolerance_rad',.08)):
+        solver=params.get('/stage_c_kinematics/'+solver_key,default)
+        task=params.get('/stage_c_server/execution/'+task_key,default)
+        if not all(isinstance(v,(int,float)) and not isinstance(v,bool) and math.isfinite(v) and v>0 for v in (solver,task)) or solver>task:
+            raise ValueError('kinematics '+solver_key+' must be positive and no wider than execution/'+task_key)
     for path in ('feedback_timeout', 'stop_timeout'):
         value = config(path)
         if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:

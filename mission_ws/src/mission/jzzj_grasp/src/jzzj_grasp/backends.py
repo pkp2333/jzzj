@@ -95,6 +95,12 @@ class RosArmBackend:
             raise Failure('NOT_READY','left arm trajectory server absent')
         try:self.rospy.wait_for_service('/stage_c/compute_arm_motion',timeout=1.)
         except self.rospy.ROSException:raise Failure('NOT_READY','kinematics service absent')
+        for key,limit,default in (
+                ('max_position_residual_m',self.cfg['position_tolerance'],.003),
+                ('max_orientation_residual_rad',self.cfg.get('orientation_tolerance_rad',.08),.08)):
+            value=self.rospy.get_param('/stage_c_kinematics/'+key,default)
+            if not isinstance(value,(int,float)) or isinstance(value,bool) or not math.isfinite(value) or not 0<value<=limit:
+                raise Failure('NOT_READY','IK '+key+' exceeds task acceptance; align solver policy without widening task limits')
         self.fresh_joints();guard()
 
     def solve(self,point,orientation,guard,forward=False,seed=None):

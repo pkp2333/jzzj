@@ -108,6 +108,16 @@ class PlannerTests(unittest.TestCase):
         planner=self.planner();planner.inverse=lambda point,rotation,seed:tuple(point)+seed[3:]
         with self.assertRaisesRegex(Failure,'FK residual'):
             planner.plan(self.start,self.surface)
+
+    def test_orientation_residual_uses_explicit_task_limit_and_reports_measurement(self):
+        self.cfg['orientation_tolerance_rad']=.02
+        planner=self.planner()
+        # IK says valid, but its actual FK is 0.03 rad away from this waypoint.
+        def inverse(point,rotation,seed):
+            return tuple(point)+(2*math.atan2(rotation[1],rotation[3])+.03,seed[4],seed[5])
+        planner.inverse=inverse
+        with self.assertRaisesRegex(Failure,r'FK residual position=.*rotation=0.030000rad \(limit 0.020000\)'):
+            planner.segment(self.start,(.11,0.,.2),self.forward(self.start).orientation,'TEST')
     def test_joint_jump_cannot_hide_behind_close_tcp_points(self):
         planner=self.planner()
         planner.inverse=lambda point,rotation,seed:tuple(point)+(1.,0.,1.)

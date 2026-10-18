@@ -78,6 +78,8 @@ def validate_config(cfg):
     if cfg.get('verification_mode','lift') not in ('lift','disappearance'):raise ValueError('invalid verification_mode')
     if 'gripper_closed_tolerance_rad' in cfg and (not math.isfinite(cfg['gripper_closed_tolerance_rad']) or cfg['gripper_closed_tolerance_rad']<=0):
         raise ValueError('invalid gripper tolerance')
+    if not math.isfinite(cfg.get('orientation_tolerance_rad',.08)) or cfg.get('orientation_tolerance_rad',.08)<=0:
+        raise ValueError('positive finite orientation_tolerance_rad required')
     if not finite_vector(cfg['workspace_min'],3) or not finite_vector(cfg['workspace_max'],3):raise ValueError('invalid workspace')
     if any(a>=b for a,b in zip(cfg['workspace_min'],cfg['workspace_max'])):raise ValueError('empty workspace')
     if not math.isfinite(cfg['safe_tcp_min_height_m']) or cfg['safe_tcp_min_height_m']<0:raise ValueError('invalid table clearance')

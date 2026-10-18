@@ -162,6 +162,14 @@ class PreflightTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, 'real_motion_enabled'):
             preflight.validate_launch_parameters(self.params)
 
+    def test_solver_policy_cannot_be_wider_than_final_task_precision(self):
+        for key,task,value in (('max_position_residual_m','position_tolerance',.008),
+                               ('max_orientation_residual_rad','orientation_tolerance_rad',.10)):
+            p=dict(self.params);p['/stage_c_kinematics/'+key]=value
+            with self.assertRaisesRegex(ValueError,'no wider'):preflight.validate_launch_parameters(p)
+            p['/stage_c_kinematics/'+key]=.003 if key=='max_position_residual_m' else .08
+            preflight.validate_launch_parameters(p)
+
     def test_stale_or_old_session_cannot_trigger_goal(self):
         m=types.SimpleNamespace(session_id='old',base_locked=True,arm_control_granted=True,
                                 stop_requested=False,header=types.SimpleNamespace(stamp=types.SimpleNamespace(to_sec=lambda:100.)))

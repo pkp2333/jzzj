@@ -31,6 +31,7 @@
     ],
     "max_step_m": 0.01,
     "position_tolerance": 0.003,
+    "orientation_tolerance_rad": 0.08,
     "association_radius": 0.025,
     "verify_radius": 0.025,
     "stable_frames": 3,

@@ -113,9 +113,13 @@ class PathPlanner:
             except Failure as exc:
                 raise Failure(exc.code, 'preflight '+step+': '+str(exc)) from exc
             q, actual = self.append(points, q, solved, step, floor)
-            if (distance(actual.position, position) > self.cfg['position_tolerance'] or
-                    quaternion_angle(actual.orientation, rotation) > .08):
-                raise Failure('NEEDS_REPOSITION', 'preflight '+step+': FK residual')
+            position_error=distance(actual.position,position)
+            orientation_error=quaternion_angle(actual.orientation,rotation)
+            orientation_limit=self.cfg.get('orientation_tolerance_rad',.08)
+            if position_error>self.cfg['position_tolerance'] or orientation_error>orientation_limit:
+                raise Failure('NEEDS_REPOSITION',
+                    'preflight {}: FK residual position={:.6f}m (limit {:.6f}), rotation={:.6f}rad (limit {:.6f})'.format(
+                        step,position_error,self.cfg['position_tolerance'],orientation_error,orientation_limit))
         return points, q
 
     def plan(self, start, surface, remaining=False):
