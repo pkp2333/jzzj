@@ -92,8 +92,9 @@ int main(int argc, char **argv) {
     for (int i = 0; i < 9; ++i) {
         cameraMatrix.at<double>(i/3, i%3) = camera_info_msg->K[i];
     }
-    // A vertical reflection reverses tag handedness. Decode/PnP in original
-    // sensor pixels, retaining the physical optical frame and extrinsics.
+    // Compatibility for explicitly software-reflected input only. Native input
+    // from the physically corrected camera has positive fy and is not flipped.
+    // Restore tag handedness before decoding/PnP when that legacy mode is used.
     const bool flipped_input = cameraMatrix.at<double>(1,1) < 0;
     if (flipped_input) {
         for (int c = 0; c < 3; ++c)
@@ -104,6 +105,8 @@ int main(int argc, char **argv) {
         ROS_ERROR("Invalid camera calibration");
         return -1;
     }
+    ROS_INFO("AprilTag image orientation: %s", flipped_input ?
+             "restore software-reflected input for decoding/PnP" : "native sensor pixels (no software flip)");
     distCoeffs = cv::Mat::zeros(camera_info_msg->D.size(), 1, CV_64F);
     for (size_t i = 0; i < camera_info_msg->D.size(); ++i) {
         distCoeffs.at<double>(i) = camera_info_msg->D[i];

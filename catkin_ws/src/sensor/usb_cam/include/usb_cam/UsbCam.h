@@ -63,7 +63,7 @@ private:
     std::string camera_info_path;
     std::string kill_switch_topic;
     bool visualize;
-    bool flip_vertical;
+    bool flip_vertical = false;
 
     void task_cb(const std_msgs::Bool::ConstPtr& msg);
 

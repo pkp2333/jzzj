@@ -1,5 +1,6 @@
 <launch>
-    <arg name="flip_vertical" default="true"/>
+    <!-- Camera mounting is physically corrected; publish native sensor pixels. -->
+    <arg name="flip_vertical" default="false"/>
     <arg name="argPath" default="$(find ascamera)/configurationfiles"/>
     <node pkg="ascamera" name="ascamera_hp60c" type="ascamera_node" respawn="true"  output="screen" >
         <param name="flip_vertical" value="$(arg flip_vertical)"/>

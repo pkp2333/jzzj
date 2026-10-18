@@ -4,7 +4,8 @@
     
     <arg name="camera_name" default="usb_cam" />
     <arg name="visualize" default="true" />
-    <arg name="flip_vertical" default="true" />
+    <!-- Camera mounting is physically corrected; publish native sensor pixels. -->
+    <arg name="flip_vertical" default="false" />
 
     <rosparam command="load" file="$(find user_params)/params/$(arg camera_name)_config.yaml" />
     

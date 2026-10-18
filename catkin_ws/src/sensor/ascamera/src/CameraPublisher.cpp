@@ -26,6 +26,8 @@ CameraPublisher::CameraPublisher(ros::NodeHandle nh)
 {
     m_nh = nh;
     m_nh.param("flip_vertical", m_flip_vertical, false);
+    ROS_INFO("AS camera image orientation: %s", m_flip_vertical ?
+             "software vertical flip (CameraInfo adjusted)" : "native sensor pixels (no software flip)");
 
     initLaunchParams();
     m_nodeNameSpace = m_nh.getNamespace();
