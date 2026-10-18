@@ -112,8 +112,8 @@ void USER_UART2_rx_callback(void)
     u2_rx_buffer[u2_rx_index] = huart2.Instance->DR;
     u2_rx_index++;
 
-    // 检查是否接收到有效头部（0xFF, 0xF5）
-    if (u2_rx_index >= 2 && u2_rx_buffer[0] == 0xFF && u2_rx_buffer[1] == 0xF5)
+    // 检查是否接收到有效头部（0xFF, 0xFF）
+    if (u2_rx_index >= 2 && u2_rx_buffer[0] == 0xFF && u2_rx_buffer[1] == 0xFF)
     {
         // 完整数据包（8字节）
         if (u2_rx_index >= 8)
@@ -121,11 +121,16 @@ void USER_UART2_rx_callback(void)
             // 复制到临时缓冲区
             memcpy(my_u2_rx_buffer, u2_rx_buffer, 8);
             uint8_t id = my_u2_rx_buffer[2];  // 舵机ID（1-6）
-            uint16_t raw_position = (my_u2_rx_buffer[5] << 8) | my_u2_rx_buffer[6];  // 解析位置值
+            uint16_t raw_position = (my_u2_rx_buffer[5] << 8) | my_u2_rx_buffer[6];  // 解析位置值（高字节在前）
             uint32_t current_time = HAL_GetTick();  // 获取当前时间戳
 
-            // 数据有效性校验（0-4096）
-            if (raw_position <= 4096)
+            // 校验和验证：CheckSum = ~(ID + Length + ERROR + 位置H + 位置L) & 0xFF
+            uint8_t checksum = (~(my_u2_rx_buffer[2] + my_u2_rx_buffer[3] +
+                                  my_u2_rx_buffer[4] + my_u2_rx_buffer[5] +
+                                  my_u2_rx_buffer[6])) & 0xFF;
+
+            // 数据有效性校验：帧校验、舵机ID范围（防数组越界）、位置范围（0-4095）
+            if (checksum == my_u2_rx_buffer[7] && id >= 1 && id <= 6 && raw_position <= 4095)
             {
                 // 仅当新数据时间戳更新时才覆盖（防旧数据）
                 if (current_time > servo2_last_update[id])
@@ -134,15 +139,7 @@ void USER_UART2_rx_callback(void)
                     servo2_last_update[id] = current_time;  // 更新时间戳
                 }
             }
-            else
-            {
-                // 无效数据：重置缓冲区并重新读取该舵机
-                u2_rx_index = 0;
-                memset(u2_rx_buffer, 0, RX_BUFFER_SIZE);
-                memset(my_u2_rx_buffer, 0, RX_BUFFER_SIZE);
-                bus_servo_read(id, huart2);  // 重新发送读取命令
-                return;
-            }
+            // 校验失败则丢弃该帧：主循环每圈都会轮询读取该舵机，无需在中断内重发命令
 
             u2_rx_index = 0;  // 重置索引接收下一组数据
         }
@@ -172,16 +169,22 @@ void USER_UART3_rx_callback(void)
     u3_rx_buffer[u3_rx_index] = huart3.Instance->DR;
     u3_rx_index++;
 
-    if (u3_rx_index >= 2 && u3_rx_buffer[0] == 0xFF && u3_rx_buffer[1] == 0xF5)
+    if (u3_rx_index >= 2 && u3_rx_buffer[0] == 0xFF && u3_rx_buffer[1] == 0xFF)
     {
         if (u3_rx_index >= 8)
         {
             memcpy(my_u3_rx_buffer, u3_rx_buffer, 8);
             uint8_t id = my_u3_rx_buffer[2];
-            uint16_t raw_position = (my_u3_rx_buffer[5] << 8) | my_u3_rx_buffer[6];
+            uint16_t raw_position = (my_u3_rx_buffer[5] << 8) | my_u3_rx_buffer[6];  // 高字节在前
             uint32_t current_time = HAL_GetTick();
 
-            if (raw_position <= 4096)
+            // 校验和验证：CheckSum = ~(ID + Length + ERROR + 位置H + 位置L) & 0xFF
+            uint8_t checksum = (~(my_u3_rx_buffer[2] + my_u3_rx_buffer[3] +
+                                  my_u3_rx_buffer[4] + my_u3_rx_buffer[5] +
+                                  my_u3_rx_buffer[6])) & 0xFF;
+
+            // 数据有效性校验：帧校验、舵机ID范围（防数组越界）、位置范围（0-4095）
+            if (checksum == my_u3_rx_buffer[7] && id >= 1 && id <= 6 && raw_position <= 4095)
             {
                 if (current_time > servo3_last_update[id])
                 {
@@ -189,14 +192,7 @@ void USER_UART3_rx_callback(void)
                     servo3_last_update[id] = current_time;
                 }
             }
-            else
-            {
-                u3_rx_index = 0;
-                memset(u3_rx_buffer, 0, RX_BUFFER_SIZE);
-                memset(my_u3_rx_buffer, 0, RX_BUFFER_SIZE);
-                bus_servo_read(id, huart3);  // 重新读取该舵机
-                return;
-            }
+            // 校验失败则丢弃该帧：主循环每圈都会轮询读取该舵机，无需在中断内重发命令
 
             u3_rx_index = 0;
         }
@@ -318,6 +314,7 @@ void Process_I2C_Command(void)
         case 0x31: case 0x32: case 0x33: case 0x34: case 0x35: case 0x36:
         {
             uint8_t servo_id = current_register - 0x31 + 1;
+            tx_ram[0] = 0xFF;  // 返回帧首字节（协议规定为FF）
             tx_ram[1] = (servo_positions[current_bus_servo_index][servo_id].real_position >> 8) & 0xFF;  // 高8位
             tx_ram[2] = servo_positions[current_bus_servo_index][servo_id].real_position & 0xFF;         // 低8位
             tx_offset = 0;  // 重置发送偏移
@@ -328,6 +325,7 @@ void Process_I2C_Command(void)
         case 0x37:
         {
             uint8_t servo_id = rx_ram[1];
+            tx_ram[0] = 0xFF;  // 返回帧首字节（协议规定为FF）
             tx_ram[1] = (servo_positions[current_bus_servo_index][servo_id].real_position >> 8) & 0xFF;
             tx_ram[2] = servo_positions[current_bus_servo_index][servo_id].real_position & 0xFF;
             tx_offset = 0;
@@ -360,6 +358,7 @@ void Process_I2C_Command(void)
         // 读取6路舵机位置（0x2D）
         case 0x2D:
         {
+            tx_ram[0] = 0xFF;  // 返回帧首字节（协议规定为FF）
             for (uint8_t i = 1; i <= 6; i++)
             {
                 tx_ram[(i-1)*2 + 1] = (servo_positions[current_bus_servo_index][i].real_position >> 8) & 0xFF;
