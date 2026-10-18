@@ -75,6 +75,9 @@ def validate_config(cfg):
     for k in ('stable_frames','verification_frames','max_motion_steps'):
         if type(cfg[k]) is not int or cfg[k]<1:raise ValueError('positive integer budgets required')
     if not 0<cfg['min_quality']<=1:raise ValueError('invalid quality threshold')
+    if cfg.get('verification_mode','lift') not in ('lift','disappearance'):raise ValueError('invalid verification_mode')
+    if 'gripper_closed_tolerance_rad' in cfg and (not math.isfinite(cfg['gripper_closed_tolerance_rad']) or cfg['gripper_closed_tolerance_rad']<=0):
+        raise ValueError('invalid gripper tolerance')
     if not finite_vector(cfg['workspace_min'],3) or not finite_vector(cfg['workspace_max'],3):raise ValueError('invalid workspace')
     if any(a>=b for a,b in zip(cfg['workspace_min'],cfg['workspace_max'])):raise ValueError('empty workspace')
     if not math.isfinite(cfg['safe_tcp_min_height_m']) or cfg['safe_tcp_min_height_m']<0:raise ValueError('invalid table clearance')
@@ -90,7 +93,8 @@ def validate_config(cfg):
         if not all(math.isfinite(p[k]) for k in ('open_rad','closed_rad','transit_clearance_height_m')):raise ValueError('nonfinite profile')
         if p['open_rad']==p['closed_rad']:raise ValueError('distinct gripper setpoints required')
         if not finite_vector(p['vertical_axis'],3) or abs(dot(p['vertical_axis'],p['vertical_axis'])-1)>1e-5:raise ValueError('unit upward table normal required')
-        if not all(math.isfinite(p[k]) for k in ('table_plane_offset_m','min_object_height_m','max_object_height_m')) or not 0<p['min_object_height_m']<p['max_object_height_m']:
+        if not all(math.isfinite(p[k]) for k in ('table_plane_offset_m','min_object_height_m','max_object_height_m')) or not 0<=p['min_object_height_m']<p['max_object_height_m']:
+        # min=0 is legal: plane-mode observations sit exactly on the calibrated plane.
             raise ValueError('explicit table plane and object-height band required')
 
 class Store:
@@ -110,6 +114,7 @@ class Engine:
                  sleep=time.sleep, feedback=lambda *args: None):
         validate_config(config)
         self.backend, self.store, self.cfg = backend, store, config
+        self.verification_mode = config.get('verification_mode', 'lift')
         self.now, self.clock, self.sleep, self.feedback = now, monotonic, sleep, feedback
         self.cancel = threading.Event()
         self.session = None
@@ -204,6 +209,26 @@ class Engine:
                 raise Failure('GRASP_UNCONFIRMED','object did not rise from original surface')
         self.verified=True
 
+    def verify_disappearance(self,identity,site):
+        """Depth-free grasp evidence: a successful close plus the target leaving
+        the grasp site for verification_frames fresh, healthy observation frames.
+        Anything ambiguous stays GRASP_UNCONFIRMED/SENSOR_INVALID - never success."""
+        if not self.closed:raise Failure('GRASP_UNCONFIRMED','close never completed')
+        checked=self.now()
+        frames=0
+        while frames<self.cfg['verification_frames']:
+            self.guard()
+            _,candidates,diagnostic=self.store.get()
+            if diagnostic and diagnostic!='ok':raise Failure('SENSOR_INVALID',diagnostic)
+            fresh=[o for o in candidates if math.isfinite(o.stamp) and o.stamp>checked and self.valid(o)]
+            if not fresh:
+                self.report('VERIFY_GRASP',site,0.,'awaiting fresh post-close observations')
+                self.sleep(0.02);continue
+            checked=max(o.stamp for o in candidates if math.isfinite(o.stamp) and o.stamp>checked)
+            if any((o.class_id,o.label,o.color)==identity and distance(o.position,site)<=self.cfg['association_radius'] for o in fresh):
+                raise Failure('GRASP_UNCONFIRMED','target still at grasp site')
+            frames+=1
+
     def execute(self, session, color, profile, timeout):
         self.session,self.color=session,color
         self.closed=self.verified=False
@@ -271,13 +296,20 @@ class Engine:
             self.backend.grip(self.profile['closed_rad'],self.guard)
             lift=add_scaled(contact,self.profile['vertical_axis'],self.profile['lift_height'])
             self.path(lift,'LIFT')
-            lift=self.backend.tcp(self.guard)
             self.report('VERIFY_GRASP')
-            self.verify(identity,contact,lift)
+            if self.verification_mode=='disappearance':
+                self.verify_disappearance(identity,self.original_surface)
+            else:
+                lift=self.backend.tcp(self.guard)
+                self.verify(identity,contact,lift)
             transport=self.profile['transport_position']
             normal=self.profile['vertical_axis']
             self.path(add_scaled(lift,normal,max(0.,dot(transport,normal)-dot(lift,normal))),'MOVE_TO_TRANSPORT_POSE')
             self.path(transport,'MOVE_TO_TRANSPORT_POSE')
+            if self.verification_mode=='disappearance':
+                self.guard()
+                self.report('SUCCESS')
+                return Outcome('SUCCESS','grasp site clear; object at transport pose',True,True,True,True,True)
             self.verified=False
             self.verify(identity,contact,self.backend.tcp(self.guard))
             self.guard()

@@ -15,7 +15,7 @@ for p in ('mission_ws/src/mission/jzzj_grasp/src','mission_ws/src/mission/jzzj_v
     sys.path.insert(0,str(ROOT/p))
 from jzzj_grasp.core import (Engine,Store,Context,Observation,Failure,step_toward,validate_config)
 from jzzj_grasp.backends import SimBackend
-from jzzj_visual_servo.perception import (Candidate,DetectorAdapter,colour_mask,project_depth_to_rgb,validate_transform)
+from jzzj_visual_servo.perception import (Candidate,DetectorAdapter,colour_mask,plane_intersection,project_depth_to_rgb,validate_transform)
 from trajectory_safety import encode,decode,validate_mapping,validate_target
 from check_model import check
 BASE=json.loads((ROOT/'mission_ws/src/mission/jzzj_grasp/params/stage_c.yaml').read_text())
@@ -89,6 +89,9 @@ class EngineTests(unittest.TestCase):
         for field in ('max_step_m','search_timeout','safe_tcp_min_height_m'):
             c=copy.deepcopy(BASE['execution']);c[field]=float('nan')
             with self.assertRaises(ValueError):validate_config(c)
+    def test_zero_min_height_allowed_for_plane_mode(self):
+        c=copy.deepcopy(BASE['execution']);c['profiles']['tabletop']['min_object_height_m']=0.0
+        validate_config(c)
     def test_step_limit_and_finite(self):
         self.assertAlmostEqual(math.dist((0,0,0),step_toward((0,0,0),(1,1,1),.01)),.01)
         with self.assertRaises(Failure):step_toward((0,0,float('nan')),(1,1,1),.01)
@@ -225,5 +228,95 @@ class CoordinateInfoTests(unittest.TestCase):
         from jzzj_visual_servo.coordinate_info import coordinate_info
         text=coordinate_info('arm_left/arm_base_link',100.,7,'fruit-1\nBAD','red',(0,0,.1),'tabletop',{})
         self.assertNotIn('\n',text)
+
+class PlaneModeTests(unittest.TestCase):
+    def setUp(self):
+        self.k=np.array([[100.,0,20],[0,100.,20],[0,0,1]])
+        self.t4=np.eye(4);self.t4[:3,:3]=np.diag([1.,-1.,-1.])  # camera +z -> arm -z
+        self.normal=(0.,0.,1.);self.offset=-.4                  # table plane z=-0.4 in arm frame
+    def test_plane_intersection_geometry(self):
+        pix=np.array([[20.,20.],[30.,20.],[30.,30.]])
+        pts=plane_intersection(self.k,self.t4,pix,self.normal,self.offset,.05,1.5,65.)
+        self.assertEqual(pts.shape,(3,3))
+        np.testing.assert_allclose(pts[0],[0,0,-.4],atol=1e-9)
+        np.testing.assert_allclose(pts[1][0],.1*.4,atol=1e-9)
+        # Grazing rays, out-of-range hits, parallel planes and bad normals all drop out.
+        self.assertEqual(len(plane_intersection(self.k,self.t4,pix,self.normal,self.offset,.05,.3,65.)),0)
+        self.assertEqual(len(plane_intersection(self.k,self.t4,pix,self.normal,self.offset,.05,1.5,5.)),1)
+        self.assertEqual(len(plane_intersection(self.k,self.t4,pix,(0.,1.,0.),self.offset,.05,1.5,65.)),0)
+        with self.assertRaises(ValueError):plane_intersection(self.k,self.t4,pix,(0.,0.,2.),self.offset,.05,1.5,65.)
+    def plane_cfg(self):
+        c=copy.deepcopy(BASE['perception']);c['allowed_labels']=['object'];c['localization_mode']='plane'
+        c['camera_to_arm']=self.t4.tolist()
+        return c
+    def test_plane_adapter_localises_on_table(self):
+        ad=DetectorAdapter(self.plane_cfg())
+        rgb=np.zeros((40,40,3),dtype=np.uint8);rgb[5:35,5:35,2]=255
+        out=ad.extract(rgb,None,self.k,[Candidate(1,0,'object',.9,(5,5,35,35))],'red',plane=(self.normal,self.offset))
+        self.assertEqual(len(out),1)
+        np.testing.assert_allclose(out[0][1],(0,0,-.4),atol=.01)
+        self.assertGreater(out[0][2],.5)
+    def test_plane_adapter_rejects_distant_outliers(self):
+        ad=DetectorAdapter(self.plane_cfg())
+        rgb=np.zeros((40,40,3),dtype=np.uint8)
+        rgb[10:30,10:30,2]=255;rgb[32:35,32:35,2]=255  # main target + far corner blob
+        out=ad.extract(rgb,None,self.k,[Candidate(1,0,'object',.9,(5,5,35,35))],'red',plane=(self.normal,self.offset))
+        self.assertEqual(len(out),1)
+        np.testing.assert_allclose(out[0][1],(0,0,-.4),atol=.01)
+    def test_plane_mode_argument_gates(self):
+        ad=DetectorAdapter(self.plane_cfg())
+        rgb=np.zeros((40,40,3),dtype=np.uint8);rgb[5:35,5:35,2]=255
+        det=Candidate(1,0,'object',.9,(5,5,35,35))
+        with self.assertRaises(ValueError):ad.extract(rgb,None,self.k,[det],'red')
+        c=self.plane_cfg();c['localization_mode']='bogus'
+        with self.assertRaises(ValueError):DetectorAdapter(c)
+
+class DisappearanceTests(unittest.TestCase):
+    def harness(self):
+        h=Harness();h.cfg['verification_mode']='disappearance'
+        h.cfg.setdefault('gripper_closed_tolerance_rad',.05)
+        h.engine=Engine(h.backend,h.store,h.cfg,now=lambda:h.t,monotonic=lambda:h.t,sleep=h.sleep,
+                        feedback=lambda step,*a:h.steps.append(step))
+        return h
+    def test_disappearance_success(self):
+        h=self.harness();o=h.run()
+        self.assertEqual(o.code,'SUCCESS',o.message)
+        self.assertTrue(o.grasp_confirmed and o.ready_for_transport and o.holding_object)
+        self.assertIn('MOVE_TO_TRANSPORT_POSE',h.steps)
+    def test_disappearance_target_still_present(self):
+        h=self.harness();h.backend.drop=True
+        self.assertEqual(h.run().code,'GRASP_UNCONFIRMED')
+    def test_disappearance_sensor_fault_is_not_success(self):
+        h=self.harness()
+        def fault(h):
+            if h.backend.closed:h.store.diagnostic='sim sensor failure'
+        h.fault=fault
+        self.assertEqual(h.run().code,'SENSOR_INVALID')
+    def test_disappearance_stale_frames_never_confirm(self):
+        h=self.harness()
+        def fault(h):
+            if 'CLOSE_GRIPPER' in h.steps:h.frames=False
+        h.fault=fault
+        o=h.run()
+        self.assertNotEqual(o.code,'SUCCESS');self.assertFalse(o.grasp_confirmed)
+    def test_verification_mode_validation(self):
+        c=copy.deepcopy(BASE['execution']);c['verification_mode']='bogus'
+        with self.assertRaises(ValueError):validate_config(c)
+        c['verification_mode']='disappearance';c['gripper_closed_tolerance_rad']=-1.
+        with self.assertRaises(ValueError):validate_config(c)
+        c['gripper_closed_tolerance_rad']=.05
+        validate_config(c)
+    def test_gripper_measured_position_check(self):
+        from types import SimpleNamespace
+        from jzzj_grasp.backends import RosArmBackend
+        b=RosArmBackend.__new__(RosArmBackend)
+        b.cfg=copy.deepcopy(BASE['execution'])
+        b.fresh_joints=lambda:SimpleNamespace(name=b.cfg['joint_names'],position=[.1]*5+[.52])
+        sent=[]
+        b.trajectory=lambda positions,guard:sent.append(list(positions))
+        guard=lambda:None
+        b.grip(.52,guard)
+        self.assertEqual(len(sent),1)
+        with self.assertRaises(Failure):b.grip(.6,guard)
 
 if __name__=='__main__':unittest.main()

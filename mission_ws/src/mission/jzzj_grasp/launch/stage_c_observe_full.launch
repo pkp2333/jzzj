@@ -1,0 +1,26 @@
+<?xml version="1.0"?>
+<launch>
+    <!-- stage C 视觉闭环·观察模式：YOLO检测 + 合并器 + observer（输出[ARM_TARGET]目标坐标）
+         不启动机械臂和底盘，纯视觉验证。相机需已单独启动（ascamera hp60c.launch）。
+         target_color 可选 red/green/blue/yellow -->
+    <arg name="target_color" default="green"/>
+    <arg name="config" default="/home/orangepi/jzzj-stagec/deploy/stage_c.yaml"/>
+    <arg name="detector_config" default="/home/orangepi/jzzj-stagec/deploy/detector.yaml"/>
+
+    <!-- YOLO（复用已运行相机的图像流；yaml顶层键已是yolov5_rknn_rc，不能再加ns） -->
+    <rosparam command="load" file="$(arg detector_config)"/>
+    <node pkg="yolov5_rknn" type="yolov5_rknn_stream" name="yolov5_rknn_stream" ns="yolov5_rknn_rc" output="screen"/>
+
+    <!-- 合并YOLO左右分区检测为单一话题（仅部署版YOLO需要） -->
+    <node pkg="jzzj_visual_servo" type="detections_merger.py" name="detections_merger" output="screen"/>
+
+    <!-- 视觉观察节点：RGB-D + YLOE → 臂坐标系目标 -->
+    <node pkg="jzzj_visual_servo" type="stage_c_observer.py" name="stage_c_observer" output="screen">
+        <rosparam command="load" file="$(arg config)"/>
+        <param name="tune_color" value="false"/>
+    </node>
+
+    <!-- 观察模式选择目标颜色 -->
+    <node pkg="rostopic" type="rostopic" name="stage_c_observe_selection"
+          args="pub -l /stage_c/selection jzzj_grasp_interfaces/TargetSelection '{session_id: observation-only, target_color: $(arg target_color), enabled: true}'"/>
+</launch>

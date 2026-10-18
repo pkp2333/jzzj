@@ -1,4 +1,4 @@
-"""YOLO-box-only colour/depth observation, with no ROS or hardware dependency."""
+"""YOLO-box-only colour observation with depth or table-plane localisation, no ROS/hardware dependency."""
 from dataclasses import dataclass
 import math
 import numpy as np
@@ -67,9 +67,47 @@ def project_depth_to_rgb(depth, depth_k, rgb_k, depth_to_rgb, shape, scale):
     out[~np.isfinite(out)]=0
     return out.reshape(h,w)
 
+def plane_intersection(k,camera_to_arm,pixels,normal,offset,min_range,max_range,max_ray_tilt_deg):
+    """Intersect camera rays with the arm-frame plane dot(normal,p)=offset.
+
+    Pixels are (u,v) pairs in the RGB image. Returns an (M,3) array of arm-frame
+    points for rays that travel forward, tilt at most max_ray_tilt_deg away from
+    -normal, and reach the plane within [min_range,max_range] metres."""
+    t=validate_transform(camera_to_arm)
+    kk=np.asarray(k,dtype=float).reshape(3,3)
+    if not np.isfinite(kk).all() or any(abs(v)<=1e-12 for v in (kk[0,0],kk[1,1])):
+        raise ValueError('invalid RGB intrinsics')
+    n=np.asarray(normal,dtype=float).reshape(3)
+    if not np.isfinite(n).all() or abs(n@n-1.)>1e-5:
+        raise ValueError('unit plane normal required')
+    if (not all(math.isfinite(v) and v>0 for v in (min_range,max_range,max_ray_tilt_deg))
+            or not math.isfinite(offset)
+            or min_range>=max_range or max_ray_tilt_deg>=90.):
+        raise ValueError('invalid plane range/tilt parameters')
+    pix=np.asarray(pixels,dtype=float)
+    if pix.ndim!=2 or pix.shape[1]!=2 or not np.isfinite(pix).all():
+        raise ValueError('invalid pixel array')
+    if len(pix)==0:return np.zeros((0,3))
+    dirs=np.linalg.solve(kk,np.vstack((pix[:,0],pix[:,1],np.ones(len(pix)))))
+    dirs=t[:3,:3]@dirs
+    denom=dirs.T@n
+    cos_tilt=-denom/np.linalg.norm(dirs,axis=0)
+    keep=(denom<-1e-9)&(cos_tilt>=math.cos(math.radians(max_ray_tilt_deg)))
+    if not keep.any():return np.zeros((0,3))
+    d=dirs[:,keep];c=denom[keep]
+    s=(offset-float(n@t[:3,3]))/c
+    pts=t[:3,3:4]+d*s
+    dist=np.linalg.norm(d,axis=0)*s
+    ok=(s>0)&(dist>=min_range)&(dist<=max_range)
+    return pts[:,ok].T
+
 class DetectorAdapter:
     def __init__(self,cfg):
         self.cfg=cfg
+        self.mode=cfg.get('localization_mode','depth')
+        if self.mode not in ('depth','plane'):raise ValueError('invalid localization_mode')
+        tilt=cfg.get('max_ray_tilt_deg',65.)
+        if not math.isfinite(tilt) or not 0.<tilt<90.:raise ValueError('invalid max_ray_tilt_deg')
         self.transform=validate_transform(cfg['camera_to_arm'])
         for key in ('min_confidence','min_color_fraction','min_depth_fraction'):
             if not math.isfinite(cfg[key]) or not 0<cfg[key]<=1:raise ValueError('invalid fraction/confidence threshold')
@@ -82,17 +120,22 @@ class DetectorAdapter:
                 if len(low)!=3 or len(high)!=3 or any(not math.isfinite(a) or not math.isfinite(b) or not 0<=a<=b<=m for a,b,m in zip(low,high,(180,255,255))):
                     raise ValueError('invalid HSV interval')
 
-    def extract(self,bgr,depth_m,k,candidates,color):
+    def extract(self,bgr,depth_m,k,candidates,color,plane=None):
         if color not in self.cfg['colors']:
             raise ValueError('unsupported target colour')
-        if bgr.ndim!=3 or bgr.shape[2]!=3 or depth_m.shape!=bgr.shape[:2]:
-            raise ValueError('RGB/depth shape mismatch')
+        if bgr.ndim!=3 or bgr.shape[2]!=3:
+            raise ValueError('invalid RGB image')
+        if self.mode=='depth':
+            if depth_m is None:raise ValueError('depth image required in depth mode')
+            if depth_m.shape!=bgr.shape[:2]:raise ValueError('RGB/depth shape mismatch')
+        elif plane is None:
+            raise ValueError('plane (normal, offset) required in plane mode')
         k=np.asarray(k,dtype=float).reshape(3,3)
         if not np.isfinite(k).all() or any(abs(v)<=1e-12 for v in (k[0,0],k[1,1])):
             raise ValueError('invalid RGB intrinsics')
         if not self.cfg['allowed_labels']:
             raise ValueError('explicit model label allowlist is required')
-        h,w=depth_m.shape;results=[]
+        h,w=bgr.shape[:2];results=[]
         for c in candidates:
             if (not math.isfinite(c.score) or c.score<self.cfg['min_confidence'] or
                     c.label not in self.cfg['allowed_labels'] or
@@ -108,6 +151,21 @@ class DetectorAdapter:
             mask=colour_mask(bgr[y1:y2,x1:x2],self.cfg['colors'][color])
             count=int(mask.sum());area=mask.size
             if count<self.cfg['min_color_pixels'] or count/area<self.cfg['min_color_fraction']:continue
+            if self.mode=='plane':
+                # Table-plane rays replace per-pixel depth; identical quality gates apply.
+                normal,offset=plane
+                vv,uu=np.nonzero(mask)
+                pts=plane_intersection(k,self.transform,np.column_stack((uu+x1,vv+y1)),
+                    normal,offset,self.cfg['min_depth_m'],self.cfg['max_depth_m'],
+                    float(self.cfg.get('max_ray_tilt_deg',65.)))
+                if len(pts)<self.cfg['min_depth_pixels'] or len(pts)/max(count,1)<self.cfg['min_depth_fraction']:continue
+                med=np.median(pts,axis=0)
+                keepm=np.all(np.abs(pts-med)<=np.maximum(self.cfg['depth_outlier_m'],3*np.median(np.abs(pts-med),axis=0)),axis=1)
+                if keepm.sum()<self.cfg['min_depth_pixels']:continue
+                position=tuple(float(v) for v in np.median(pts[keepm],axis=0))
+                quality=float(c.score*min(1.,count/area)*keepm.sum()/max(count,1))
+                results.append((c,position,quality,(x1,y1,x2-x1,y2-y1)))
+                continue
             d=depth_m[y1:y2,x1:x2]
             valid=mask & np.isfinite(d) & (d>=self.cfg['min_depth_m']) & (d<=self.cfg['max_depth_m'])
             if valid.sum()<self.cfg['min_depth_pixels'] or valid.sum()/max(count,1)<self.cfg['min_depth_fraction']:continue

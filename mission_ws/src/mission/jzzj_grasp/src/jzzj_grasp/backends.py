@@ -162,6 +162,11 @@ class RosArmBackend:
         m=self.fresh_joints();values=dict(zip(m.name,m.position))
         values[self.cfg['joint_names'][5]]=value
         self.trajectory([values[n] for n in self.cfg['joint_names']],guard)
+        # Driver acceptance is not joint truth; confirm the measured claw position.
+        m=self.fresh_joints()
+        actual=dict(zip(m.name,m.position))[self.cfg['joint_names'][5]]
+        if not math.isfinite(actual) or abs(actual-value)>self.cfg.get('gripper_closed_tolerance_rad',.05):
+            raise Failure('MOTION_FAILED','measured gripper position deviates from command')
 
 
     def hold(self,timeout):

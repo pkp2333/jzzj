@@ -17,10 +17,15 @@ class Observer:
     def __init__(self):
         self.cfg=rospy.get_param('~perception')
         self.adapter=DetectorAdapter(self.cfg)
+        self.mode=self.cfg.get('localization_mode','depth')
+        if self.mode not in ('depth','plane'):raise ValueError('invalid localization_mode')
         self.tune=rospy.get_param('~tune_color',False)
         self.log_coordinates=rospy.get_param('~log_arm_coordinates',True)
         self.grasp_profile_name=rospy.get_param('~grasp_profile','tabletop')
         self.grasp_profile=rospy.get_param('~execution/profiles',{}).get(self.grasp_profile_name,{})
+        if self.mode=='plane':
+            for key in ('vertical_axis','table_plane_offset_m'):
+                if key not in self.grasp_profile:raise ValueError('grasp profile missing %s for plane mode'%key)
         self.bridge=CvBridge();self.lock=threading.RLock()
         self.rgb=deque(maxlen=120);self.depth=deque(maxlen=120);self.pending=deque(maxlen=15)
         self.rgb_info=self.depth_info=None;self.selection=None;self.last=0.
@@ -29,9 +34,10 @@ class Observer:
         self.debug=rospy.Publisher('/stage_c/debug_image',Image,queue_size=1)
         rospy.Subscriber('/stage_c/selection',TargetSelection,self.select,queue_size=1)
         rospy.Subscriber(self.cfg['rgb_topic'],Image,lambda m:self.cache(self.rgb,m),queue_size=5)
-        rospy.Subscriber(self.cfg['depth_topic'],Image,lambda m:self.cache(self.depth,m),queue_size=5)
         rospy.Subscriber(self.cfg['rgb_info_topic'],CameraInfo,self.info,callback_args='rgb',queue_size=1)
-        rospy.Subscriber(self.cfg['depth_info_topic'],CameraInfo,self.info,callback_args='depth',queue_size=1)
+        if self.mode=='depth':
+            rospy.Subscriber(self.cfg['depth_topic'],Image,lambda m:self.cache(self.depth,m),queue_size=5)
+            rospy.Subscriber(self.cfg['depth_info_topic'],CameraInfo,self.info,callback_args='depth',queue_size=1)
         rospy.Subscriber(self.cfg['detections_topic'],ObjDets,self.detect,queue_size=5)
         rospy.Timer(rospy.Duration(.02),self.tick)
 
@@ -61,6 +67,10 @@ class Observer:
                 stamp=d.header.stamp.to_sec()
                 if stamp<=self.last or stamp<=0 or now-stamp<-.05:continue
                 rgb=next((m for m in reversed(self.rgb) if abs((m.header.stamp-d.header.stamp).to_sec())<1e-6),None)
+                if self.mode=='plane':
+                    # No depth stream to pair; the calibrated table plane provides range.
+                    if rgb:available.append((d,rgb,None))
+                    continue
                 dep=min(self.depth,key=lambda m:abs((m.header.stamp-d.header.stamp).to_sec()),default=None)
                 if rgb and dep and abs((dep.header.stamp-d.header.stamp).to_sec())<=self.cfg['sync_tolerance']:
                     available.append((d,rgb,dep))
@@ -70,29 +80,32 @@ class Observer:
         output=TargetObservations();output.header=copy.deepcopy(d.header);output.header.frame_id=self.cfg['arm_frame'];output.session_id=s.session_id
         try:
             if not self.cfg['calibration_confirmed']:raise ValueError('camera calibration not confirmed')
-            if ri is None or di is None:raise ValueError('camera_info missing')
-            if (ri.width,ri.height)!=(rgb.width,rgb.height) or (di.width,di.height)!=(dep.width,dep.height):
+            if ri is None or (self.mode=='depth' and di is None):raise ValueError('camera_info missing')
+            if (ri.width,ri.height)!=(rgb.width,rgb.height) or (self.mode=='depth' and (di.width,di.height)!=(dep.width,dep.height)):
                 raise ValueError('camera_info dimensions mismatch')
             if rgb.header.frame_id!=self.cfg['rgb_frame'] or d.header.frame_id!=rgb.header.frame_id:
                 raise ValueError('RGB/detection frame mismatch')
-            if ri.header.frame_id!=rgb.header.frame_id or di.header.frame_id!=dep.header.frame_id:
+            if ri.header.frame_id!=rgb.header.frame_id or (self.mode=='depth' and di.header.frame_id!=dep.header.frame_id):
                 raise ValueError('camera_info frame mismatch')
-            if dep.header.frame_id!=self.cfg['depth_frame']:raise ValueError('unexpected depth frame')
-            if any(abs(v)>1e-9 for v in ri.D) or any(abs(v)>1e-9 for v in di.D):
+            if self.mode=='depth' and dep.header.frame_id!=self.cfg['depth_frame']:raise ValueError('unexpected depth frame')
+            if any(abs(v)>1e-9 for v in ri.D) or (self.mode=='depth' and any(abs(v)>1e-9 for v in di.D)):
                 raise ValueError('use rectified image/camera_info streams (nonzero distortion rejected)')
             bgr=self.bridge.imgmsg_to_cv2(rgb,'bgr8')
-            depth=self.bridge.imgmsg_to_cv2(dep,'passthrough')
-            scales=self.cfg['depth_scales']
-            if dep.encoding not in scales:raise ValueError('unsupported/unconfigured depth encoding')
-            scale=float(scales[dep.encoding])
-            if not np.isfinite(scale) or scale<=0:raise ValueError('invalid configured depth scale')
-            if self.cfg['depth_registered_to_rgb']:
-                if depth.shape!=bgr.shape[:2]:raise ValueError('registered depth size mismatch')
-                if not np.allclose(di.K,ri.K,rtol=1e-5,atol=1e-5):raise ValueError('registered depth intrinsics must match RGB')
-                meters=depth.astype(float)*scale
+            if self.mode=='plane':
+                meters=None
             else:
-                if not self.cfg['registration_calibrated']:raise ValueError('depth registration extrinsics not confirmed')
-                meters=project_depth_to_rgb(depth,di.K,ri.K,self.cfg['depth_to_rgb'],bgr.shape[:2],scale)
+                depth=self.bridge.imgmsg_to_cv2(dep,'passthrough')
+                scales=self.cfg['depth_scales']
+                if dep.encoding not in scales:raise ValueError('unsupported/unconfigured depth encoding')
+                scale=float(scales[dep.encoding])
+                if not np.isfinite(scale) or scale<=0:raise ValueError('invalid configured depth scale')
+                if self.cfg['depth_registered_to_rgb']:
+                    if depth.shape!=bgr.shape[:2]:raise ValueError('registered depth size mismatch')
+                    if not np.allclose(di.K,ri.K,rtol=1e-5,atol=1e-5):raise ValueError('registered depth intrinsics must match RGB')
+                    meters=depth.astype(float)*scale
+                else:
+                    if not self.cfg['registration_calibrated']:raise ValueError('depth registration extrinsics not confirmed')
+                    meters=project_depth_to_rgb(depth,di.K,ri.K,self.cfg['depth_to_rgb'],bgr.shape[:2],scale)
             if self.tune:
                 import cv2
                 window='Stage C HSV (YOLO ROIs only)'
@@ -107,7 +120,12 @@ class Observer:
                 cv2.imshow(window,bgr);cv2.waitKey(1)
                 rospy.loginfo_throttle(3.,'HSV tuning %s: %s',s.target_color,self.cfg['colors'][s.target_color])
             candidates=[Candidate(x.index,x.class_id,x.label,x.score,(x.bbox.x1,x.bbox.y1,x.bbox.x2,x.bbox.y2)) for x in d.dets]
-            results=self.adapter.extract(bgr,meters,ri.K,candidates,s.target_color)
+            if self.mode=='plane':
+                plane=(tuple(float(v) for v in self.grasp_profile['vertical_axis']),
+                       float(self.grasp_profile['table_plane_offset_m']))
+                results=self.adapter.extract(bgr,None,ri.K,candidates,s.target_color,plane=plane)
+            else:
+                results=self.adapter.extract(bgr,meters,ri.K,candidates,s.target_color)
             for c,p,q,box in results:
                 o=TargetObservation();o.header=output.header;o.session_id=s.session_id;o.track_id=c.track_id
                 o.class_id=c.class_id;o.label=c.label;o.color=s.target_color;o.position=Point(*p);o.quality=q;o.valid=True
