@@ -106,6 +106,38 @@ public:
   }
 
   std::vector<double> solve(const KDL::Frame& desired, const std::vector<double>& seed) const {
+    return solveBounded(desired,seed,true);
+  }
+
+  // Endpoint search is read-only. The caller MUST subdivide and validate the
+  // complete joint sweep before executing it; this is never a trajectory target.
+  std::vector<double> solveEndpoint(const KDL::Frame& desired, const std::vector<double>& seed) const {
+    seedValid(seed);
+    std::vector<std::vector<double>> starts{seed};
+    const double pi=std::acos(-1.);
+    for(double turn:{-pi,pi}) {
+      auto alternate=seed;alternate[0]+=turn;
+      if(alternate[0]>=low_[0] && alternate[0]<=high_[0])starts.push_back(alternate);
+    }
+    auto middle=seed;
+    for(unsigned i=0;i<middle.size();++i)middle[i]=(low_[i]+high_[i])/2;
+    starts.push_back(middle);
+    // Deterministic mathematical seeds, not hardware targets or calibrated poses.
+    for(double bend:{-1.2,1.2}) {
+      auto alternate=middle;
+      if(alternate.size()>3){alternate[1]=.6;alternate[2]=bend;alternate[3]=-.6-bend;}
+      starts.push_back(alternate);
+    }
+    std::string reason;
+    for(const auto& start:starts) {
+      try{return solveBounded(desired,start,false);}
+      catch(const std::exception& e){reason=e.what();}
+    }
+    throw std::runtime_error("endpoint search failed: "+reason);
+  }
+
+private:
+  std::vector<double> solveBounded(const KDL::Frame& desired, const std::vector<double>& seed, bool incremental) const {
     seedValid(seed);
     for (unsigned i = 0; i < 3; ++i) {
       if (!std::isfinite(desired.p[i])) throw std::runtime_error("nonfinite target position");
@@ -115,8 +147,8 @@ public:
     KDL::JntArray initial(seed.size()), low(seed.size()), high(seed.size()), output(seed.size());
     for (unsigned i = 0; i < seed.size(); ++i) {
       initial(i) = output(i) = seed[i];
-      low(i) = std::max(low_[i], seed[i] - policy_.max_joint_step);
-      high(i) = std::min(high_[i], seed[i] + policy_.max_joint_step);
+      low(i) = incremental ? std::max(low_[i], seed[i] - policy_.max_joint_step) : low_[i];
+      high(i) = incremental ? std::min(high_[i], seed[i] + policy_.max_joint_step) : high_[i];
     }
     const KDL::Frame wrist = desired * tcp_.Inverse();
     KDL::ChainFkSolverPos_recursive fk(chain_);
@@ -127,7 +159,15 @@ public:
     auto accept = [&]() {
       std::vector<double> q(seed.size());
       for (unsigned i = 0; i < q.size(); ++i) q[i] = output(i);
-      return validateCandidate(desired, seed, q);
+      if(!incremental)for(unsigned i=0;i<q.size();++i) {
+        const double period=2*std::acos(-1.);
+        if(std::isfinite(q[i])) {
+          const double turns=std::ceil((low_[i]-q[i])/period);
+          const double equivalent=q[i]+turns*period;
+          if(equivalent>=low_[i] && equivalent<=high_[i])q[i]=equivalent;
+        }
+      }
+      return validateCandidate(desired, incremental ? seed : q, q);
     };
     if (bounded_code >= 0 || bounded_code == KDL::SolverI::E_MAX_ITERATIONS_EXCEEDED) {
       try { return accept(); }

@@ -98,6 +98,10 @@ def runtime_check(session):
             raise RuntimeError('missing or duplicate action server: ' + topic)
     if len(dict(services).get('/stage_c/compute_arm_motion', [])) != 1:
         raise RuntimeError('missing or duplicate C kinematics service')
+    profile=rospy.get_param('/stage_c_server/execution/active_profile','tabletop')
+    if rospy.get_param('/stage_c_server/execution/profiles/'+profile+'/transit_mode','cartesian')=='joint':
+        if len(dict(services).get('/stage_c/compute_arm_endpoint',[]))!=1:
+            raise RuntimeError('missing or duplicate read-only endpoint kinematics service')
     joints = rospy.wait_for_message('/arm_left/joint_states', JointState, timeout=5)
     names = ['joint'+str(i) for i in range(1,7)]
     if (len(joints.name) != 6 or set(joints.name) != set(names) or

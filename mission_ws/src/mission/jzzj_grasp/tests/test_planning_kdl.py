@@ -35,7 +35,30 @@ class ActualKdlPlanningTests(unittest.TestCase):
         return Pose(tuple(data[:3]),tuple(data[3:7])),tuple(data[7:])+(q[5],)
     def planner(self):
         return PathPlanner(self.cfg,self.lower,self.upper,
-            lambda q:self.query('F',q)[0],lambda p,r,q:self.query('I',q,p,r)[1],lambda:None)
+            lambda q:self.query('F',q)[0],lambda p,r,q:self.query('I',q,p,r)[1],lambda:None,
+            lambda p,r,q:self.query('E',q,p,r)[1])
+
+    def field_downward_profile(self):
+        self.cfg['workspace_min']=[-.32,-.32,-.05];self.cfg['workspace_max']=[.32,.32,.4]
+        self.cfg['position_tolerance']=.01;self.cfg['orientation_tolerance_rad']=.12
+        self.cfg['profiles']['tabletop'].update(transit_mode='joint',table_plane_offset_m=-.05,
+            surface_to_grasp=[0,0,.03],orientation_xyzw=[0,math.sqrt(.5),0,math.sqrt(.5)],
+            transport_orientation_xyzw=[0,-math.sqrt(.5),0,math.sqrt(.5)],
+            transit_clearance_height_m=.10,transport_position=[.08,0,.24])
+        return (-1.2306148331305802,-.545494724396046,.019991953250116788,
+                .45553093477052004,1.2192596789609784,.009995976625058271)
+
+    def test_field_downward_grasp_and_independent_transport_pass_full_route(self):
+        start=self.field_downward_profile();prefix,route=self.planner().plan(start,(-.17,.05,-.05))
+        self.assertTrue(prefix);self.assertLess(len(route),self.cfg['max_motion_steps'])
+        self.assertTrue(all(p.joints[5]==start[5] for p in route));previous=start
+        for point in route:
+            self.assertLessEqual(max(abs(a-b) for a,b in zip(point.joints,previous)),.35+1e-12);previous=point.joints
+        self.assertLess(math.dist(self.query('F',previous)[0].position,(.08,0,.24)),.003)
+
+    def test_original_distant_target_remains_rejected_with_downward_profile(self):
+        start=self.field_downward_profile()
+        with self.assertRaises(Failure):self.planner().plan(start,(-.20205,.08196,-.05))
     def test_field_pose_rejects_before_any_open_or_arm_command(self):
         self.cfg=json.loads((ROOT/'deploy/stage_c.yaml').read_text(encoding='utf-8'))['execution']
         self.cfg['active_profile']='tabletop'

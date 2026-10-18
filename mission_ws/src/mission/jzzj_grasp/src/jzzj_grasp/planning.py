@@ -40,9 +40,10 @@ class Waypoint:
 
 
 class PathPlanner:
-    def __init__(self, cfg, lower, upper, forward, inverse, guard):
+    def __init__(self, cfg, lower, upper, forward, inverse, guard, endpoint_inverse=None):
         self.cfg, self.lower, self.upper = cfg, lower, upper
         self.forward, self.inverse, self.guard = forward, inverse, guard
+        self.endpoint_inverse=endpoint_inverse
         self.profile = cfg['profiles'][cfg['active_profile']]
         self.normal = self.profile['vertical_axis']
         self.floor = self.profile['table_plane_offset_m']+cfg['safe_tcp_min_height_m']
@@ -107,23 +108,57 @@ class PathPlanner:
         points = []; q = tuple(start)
         if distance(first.position, target) < 1e-9 and quaternion_angle(first.orientation, orientation) < 1e-9:
             return points, q
-        for i in range(1, n+1):
+        pending=[(i/n,0) for i in range(n,0,-1)];previous_fraction=0.
+        refinement=self.cfg.get('planning_refinements',4)
+        while pending:
+            fraction,depth=pending.pop()
             self.guard()
-            position = tuple(a+(b-a)*i/n for a, b in zip(first.position, target))
-            rotation = slerp(first.orientation, orientation, i/n)
+            position = tuple(a+(b-a)*fraction for a, b in zip(first.position, target))
+            rotation = slerp(first.orientation, orientation, fraction)
             try:
                 solved = tuple(self.inverse(position, rotation, q))
+                actual=self.edge(q,solved,floor)
+                position_error=distance(actual.position,position)
+                orientation_error=quaternion_angle(actual.orientation,rotation)
+                orientation_limit=self.cfg.get('orientation_tolerance_rad',.08)
+                if position_error>self.cfg['position_tolerance'] or orientation_error>orientation_limit:
+                    raise Failure('NEEDS_REPOSITION',
+                        'FK residual position={:.6f}m (limit {:.6f}), rotation={:.6f}rad (limit {:.6f})'.format(
+                            position_error,self.cfg['position_tolerance'],orientation_error,orientation_limit))
+                # Refine geometric continuity failures, never motion/stop errors.
             except Failure as exc:
+                if exc.code=='NEEDS_REPOSITION' and depth<refinement:
+                    pending.append((fraction,depth+1))
+                    pending.append(((previous_fraction+fraction)/2,depth+1))
+                    continue
                 raise Failure(exc.code, 'preflight '+step+': '+str(exc)) from exc
-            q, actual = self.append(points, q, solved, step, floor)
-            position_error=distance(actual.position,position)
-            orientation_error=quaternion_angle(actual.orientation,rotation)
-            orientation_limit=self.cfg.get('orientation_tolerance_rad',.08)
-            if position_error>self.cfg['position_tolerance'] or orientation_error>orientation_limit:
-                raise Failure('NEEDS_REPOSITION',
-                    'preflight {}: FK residual position={:.6f}m (limit {:.6f}), rotation={:.6f}rad (limit {:.6f})'.format(
-                        step,position_error,self.cfg['position_tolerance'],orientation_error,orientation_limit))
+            if self.count>=self.cfg['max_motion_steps']:raise Failure('NEEDS_REPOSITION','preflight path exceeds motion budget')
+            points.append(Waypoint(step,tuple(solved),floor));self.count+=1;q=tuple(solved);previous_fraction=fraction
         return points, q
+
+    def joint_transit(self,start,target,orientation,step,floor):
+        """Search a distant endpoint, then validate every bounded joint edge.
+
+        Cartesian pose interpolation is unsuitable for changing the full pose of
+        a five-DOF arm in place. No endpoint is sent directly to the driver.
+        """
+        if self.endpoint_inverse is None:raise Failure('NOT_READY','read-only endpoint solver absent')
+        self.guard();self.valid_joints(start);self.valid_pose(self.forward(start),floor)
+        self.valid_pose(Pose(tuple(target),tuple(orientation)),floor)
+        try:end=tuple(self.endpoint_inverse(target,orientation,start))
+        except Failure as exc:raise Failure(exc.code,'preflight '+step+' endpoint: '+str(exc)) from exc
+        self.valid_joints(end)
+        if abs(end[5]-start[5])>1e-9:raise Failure('MOTION_FAILED','transit endpoint changed gripper')
+        pose=self.forward(end)
+        if (distance(pose.position,target)>self.cfg['position_tolerance'] or
+                quaternion_angle(pose.orientation,orientation)>self.cfg.get('orientation_tolerance_rad',.08)):
+            raise Failure('NEEDS_REPOSITION','preflight '+step+': endpoint FK residual')
+        n=max(1,math.ceil(max(abs(a-b) for a,b in zip(start,end))/min(.1,self.max_joint_step)))
+        points=[];q=tuple(start)
+        for i in range(1,n+1):
+            next_q=tuple(a+(b-a)*i/n for a,b in zip(start,end))
+            q,_=self.append(points,q,next_q,step,floor)
+        return points,q
 
     def plan(self, start, surface, remaining=False):
         """Validate through transport before opening; return approach prefix only."""
@@ -136,7 +171,15 @@ class PathPlanner:
             all_points.extend(points)
         grasp = tuple(a+b for a, b in zip(surface, p['surface_to_grasp']))
         pre = add_scaled(grasp, self.normal, p['approach_height'])
-        if not remaining:
+        joint_mode=p.get('transit_mode','cartesian')=='joint'
+        transport_orientation=p.get('transport_orientation_xyzw',p['orientation_xyzw'])
+        if joint_mode and not remaining:
+            clearance=max(dot(pre,self.normal),p['table_plane_offset_m']+p['transit_clearance_height_m'])
+            above=add_scaled(pre,self.normal,clearance-dot(pre,self.normal))
+            points,q=self.joint_transit(q,above,p['orientation_xyzw'],'PREPARE_TRANSITION',max(self.floor,clearance-.003))
+            all_points.extend(points)
+            add(pre,'SERVO_PREGRASP');prefix=list(all_points)
+        if not remaining and not joint_mode:
             escapes = p.get('transition_joint_waypoints_rad', [])
             if escapes and not p.get('transition_calibrated', False):
                 raise Failure('NOT_READY', 'joint transition is not calibrated')
@@ -164,6 +207,12 @@ class PathPlanner:
         lift = add_scaled(grasp, self.normal, p['lift_height'])
         add(lift, 'LIFT')
         transport = tuple(p['transport_position'])
+        if joint_mode:
+            floor=max(self.floor,min(dot(lift,self.normal),dot(transport,self.normal),
+                                     p['table_plane_offset_m']+p['transit_clearance_height_m'])-.003)
+            points,q=self.joint_transit(q,transport,transport_orientation,'MOVE_TO_TRANSPORT_POSE',floor)
+            all_points.extend(points)
+            return prefix,all_points
         clearance = max(dot(lift, self.normal), dot(transport, self.normal),
                         p['table_plane_offset_m']+p['transit_clearance_height_m'])
         add(add_scaled(lift, self.normal, clearance-dot(lift, self.normal)), 'RAISE_FOR_TRANSPORT')

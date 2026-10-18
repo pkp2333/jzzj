@@ -53,12 +53,13 @@ int main(int argc,char** argv) {
       while(std::getline(std::cin,line)) {
         try {
           std::istringstream input(line);char op;input>>op;
-          require(op=='F' || op=='I',"invalid query operation");
+          require(op=='F' || op=='I' || op=='E',"invalid query operation");
           std::vector<double> q(5);for(auto& v:q) require(bool(input>>v),"invalid query seed");
-          if(op=='I') {
+          if(op=='I' || op=='E') {
             double x,y,z,qx,qy,qz,qw;
             require(bool(input>>x>>y>>z>>qx>>qy>>qz>>qw),"invalid query target");
-            q=ik.solve(KDL::Frame(KDL::Rotation::Quaternion(qx,qy,qz,qw),KDL::Vector(x,y,z)),q);
+            const KDL::Frame desired(KDL::Rotation::Quaternion(qx,qy,qz,qw),KDL::Vector(x,y,z));
+            q=op=='E' ? ik.solveEndpoint(desired,q) : ik.solve(desired,q);
           }
           auto pose=ik.forward(q);double x,y,z,w;pose.M.GetQuaternion(x,y,z,w);
           std::cout<<std::setprecision(17)<<"OK "<<pose.p.x()<<' '<<pose.p.y()<<' '<<pose.p.z()
@@ -104,6 +105,14 @@ int main(int argc,char** argv) {
     rejects([&]{ik.validateCandidate(moved,boundary_seed,vendor);},"FK residual");++cases;
     bad=seed;bad[0]+=.6;const auto distant=ik.forward(bad);
     rejects([&]{ik.validateCandidate(distant,seed,bad);},"continuity: joint1");++cases;
+    result=ik.solveEndpoint(distant,seed);
+    require((ik.forward(result).p-distant.p).Norm()<=policy.position_residual,"endpoint search violated FK accuracy");
+    bool distant_joint=false;
+    for(unsigned i=0;i<5;++i) {
+      require(result[i]>=robot.low[i] && result[i]<=robot.high[i],"endpoint search violated hard limits");
+      distant_joint|=std::abs(result[i]-seed[i])>policy.max_joint_step;
+    }
+    require(distant_joint,"endpoint regression did not cover a distant solution");++cases;
     auto unreachable=desired;unreachable.p=KDL::Vector(10,10,10);
     rejects([&]{ik.solve(unreachable,seed);},"IK");++cases;
     bad=seed;bad[1]=std::numeric_limits<double>::quiet_NaN();

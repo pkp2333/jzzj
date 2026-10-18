@@ -27,6 +27,7 @@ if(CATKIN_ENABLE_TESTING)
   add_test(NAME stage_c_servo_positions COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_servo_position_limits.py)
   add_test(NAME stage_c_hold_confirmation COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hold_confirmation.py)
   add_test(NAME stage_c_grasp_planning COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_grasp_planning.py)
+  add_test(NAME stage_c_joint_transit COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_joint_transit.py)
   add_test(NAME stage_c_planning_kdl COMMAND ${CMAKE_COMMAND} -E env
     "STAGE_C_KDL_PROBE=$<TARGET_FILE:kinematics_regression>"
     ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_planning_kdl.py)

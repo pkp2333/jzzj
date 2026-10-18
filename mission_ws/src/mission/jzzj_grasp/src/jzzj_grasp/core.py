@@ -74,6 +74,8 @@ def validate_config(cfg):
         raise ValueError('positive finite timing/geometry parameters required')
     for k in ('stable_frames','verification_frames','max_motion_steps'):
         if type(cfg[k]) is not int or cfg[k]<1:raise ValueError('positive integer budgets required')
+    if type(cfg.get('planning_refinements',4)) is not int or not 0<=cfg.get('planning_refinements',4)<=6:
+        raise ValueError('planning_refinements must be integer 0..6')
     if not 0<cfg['min_quality']<=1:raise ValueError('invalid quality threshold')
     if cfg.get('verification_mode','lift') not in ('lift','disappearance'):raise ValueError('invalid verification_mode')
     if 'gripper_closed_tolerance_rad' in cfg and (not math.isfinite(cfg['gripper_closed_tolerance_rad']) or cfg['gripper_closed_tolerance_rad']<=0):
@@ -88,6 +90,11 @@ def validate_config(cfg):
         value=cfg.get(key,default)
         if not math.isfinite(value) or not 0<value<=upper:raise ValueError('invalid '+key)
     for p in cfg['profiles'].values():
+        if p.get('transit_mode','cartesian') not in ('cartesian','joint'):raise ValueError('invalid transit_mode')
+        if p.get('transit_mode')=='joint':
+            rotation=p.get('transport_orientation_xyzw',[])
+            if not finite_vector(rotation,4) or abs(dot(rotation,rotation)-1)>1e-4:
+                raise ValueError('joint transit requires explicit transport orientation')
         escapes=p.get('transition_joint_waypoints_rad',[])
         if not isinstance(escapes,list) or len(escapes)>cfg['max_motion_steps'] or any(not finite_vector(q,5) for q in escapes):
             raise ValueError('transition requires a bounded list of five-joint waypoints')
@@ -321,11 +328,14 @@ class Engine:
                 self.verify(identity,contact,lift)
             transport=self.profile['transport_position']
             normal=self.profile['vertical_axis']
-            clearance=max(dot(lift,normal),dot(transport,normal),
-                          self.profile['table_plane_offset_m']+self.profile['transit_clearance_height_m'])
-            self.path(add_scaled(lift,normal,clearance-dot(lift,normal)),'MOVE_TO_TRANSPORT_POSE')
-            self.path(add_scaled(transport,normal,clearance-dot(transport,normal)),'MOVE_TO_TRANSPORT_POSE')
-            self.path(transport,'MOVE_TO_TRANSPORT_POSE')
+            if self.profile.get('transit_mode')=='joint':
+                self.backend.transport(self.profile,self.guard,lambda step,point:self.report(step,point))
+            else:
+                clearance=max(dot(lift,normal),dot(transport,normal),
+                              self.profile['table_plane_offset_m']+self.profile['transit_clearance_height_m'])
+                self.path(add_scaled(lift,normal,clearance-dot(lift,normal)),'MOVE_TO_TRANSPORT_POSE')
+                self.path(add_scaled(transport,normal,clearance-dot(transport,normal)),'MOVE_TO_TRANSPORT_POSE')
+                self.path(transport,'MOVE_TO_TRANSPORT_POSE')
             if self.verification_mode=='disappearance':
                 self.guard()
                 self.report('SUCCESS')

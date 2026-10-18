@@ -2,7 +2,7 @@
 import copy
 import math
 import time
-from .core import Failure, Observation, distance, finite_vector
+from .core import Failure, Observation, distance, finite_vector, step_toward
 
 class SimBackend:
     def __init__(self,store,cfg,now=time.time):
@@ -49,6 +49,16 @@ class SimBackend:
 
     def hold(self,timeout):self.trace.append(('hold',));return True
 
+    def transport(self,profile,guard,feedback):
+        target=profile['transport_position']
+        for _ in range(self.cfg['max_motion_steps']):
+            guard()
+            if distance(self.position,target)<=self.cfg['position_tolerance']:return
+            point=step_toward(self.position,target,self.cfg['max_step_m'])
+            feedback('MOVE_TO_TRANSPORT_POSE',point)
+            self.move(point,profile['transport_orientation_xyzw'],guard)
+        raise Failure('MOTION_FAILED','simulation transport step budget exceeded')
+
 class RosArmBackend:
     def __init__(self,cfg):
         import rospy, actionlib
@@ -58,6 +68,7 @@ class RosArmBackend:
         self.rospy,self.cfg=rospy,cfg;self.joints=None;self.received=0.;self.gripper=None;self.sent=False;self.ik_poisoned=False
         self.client=actionlib.SimpleActionClient('/arm_left/follow_joint_trajectory',FollowJointTrajectoryAction)
         self.compute=rospy.ServiceProxy('/stage_c/compute_arm_motion',ComputeArmMotion)
+        self.compute_endpoint=rospy.ServiceProxy('/stage_c/compute_arm_endpoint',ComputeArmMotion)
         from jzzj_grasp_interfaces.msg import TargetObservation
         self.observation_pub=rospy.Publisher('/stage_c/observation',TargetObservation,queue_size=1)
         self.sub=rospy.Subscriber('/arm_left/joint_states',JointState,self.joint_cb,queue_size=1)
@@ -95,6 +106,9 @@ class RosArmBackend:
             raise Failure('NOT_READY','left arm trajectory server absent')
         try:self.rospy.wait_for_service('/stage_c/compute_arm_motion',timeout=1.)
         except self.rospy.ROSException:raise Failure('NOT_READY','kinematics service absent')
+        if p.get('transit_mode')=='joint':
+            try:self.rospy.wait_for_service('/stage_c/compute_arm_endpoint',timeout=1.)
+            except self.rospy.ROSException:raise Failure('NOT_READY','endpoint kinematics service absent')
         for key,limit,default in (
                 ('max_position_residual_m',self.cfg['position_tolerance'],.003),
                 ('max_orientation_residual_rad',self.cfg.get('orientation_tolerance_rad',.08),.08)):
@@ -103,7 +117,7 @@ class RosArmBackend:
                 raise Failure('NOT_READY','IK '+key+' exceeds task acceptance; align solver policy without widening task limits')
         self.fresh_joints();guard()
 
-    def solve(self,point,orientation,guard,forward=False,seed=None):
+    def solve(self,point,orientation,guard,forward=False,seed=None,endpoint=False):
         from jzzj_grasp_interfaces.srv import ComputeArmMotionRequest
         if self.ik_poisoned:raise Failure('MOTION_FAILED','IK worker unresponsive; restart required')
         guard();req=ComputeArmMotionRequest();req.forward_only=forward
@@ -117,7 +131,7 @@ class RosArmBackend:
         import threading
         done=threading.Event();box={}
         def call():
-            try:box['value']=self.compute(req)
+            try:box['value']=(self.compute_endpoint if endpoint else self.compute)(req)
             except Exception as exc:box['error']=exc
             finally:done.set()
         threading.Thread(target=call,daemon=True).start()
@@ -157,8 +171,8 @@ class RosArmBackend:
             r=self.solve(None,None,guard,True,seed(q));p=r.tcp_pose.pose
             return Pose((p.position.x,p.position.y,p.position.z),
                         (p.orientation.x,p.orientation.y,p.orientation.z,p.orientation.w))
-        def inverse(point,orientation,q):
-            r=self.solve(point,orientation,guard,seed=seed(q))
+        def inverse(point,orientation,q,endpoint=False):
+            r=self.solve(point,orientation,guard,seed=seed(q),endpoint=endpoint)
             if len(r.solution.name)!=6 or set(r.solution.name)!=set(self.cfg['joint_names']) or not finite_vector(r.solution.position,6):
                 raise Failure('MOTION_FAILED','IK joint mapping mismatch')
             values=dict(zip(r.solution.name,r.solution.position))
@@ -168,7 +182,8 @@ class RosArmBackend:
             upper=self.rospy.get_param('/arm_left/arm_trajectory/joint_upper_rad')
         except KeyError as exc:
             raise Failure('NOT_READY','canonical /arm_left/arm_trajectory limits absent; use tools/stage_c/start_control.sh real') from exc
-        return PathPlanner(self.cfg,lower,upper,forward,inverse,guard)
+        return PathPlanner(self.cfg,lower,upper,forward,inverse,guard,
+                           lambda p,r,q:inverse(p,r,q,endpoint=True))
 
     def preflight(self,surface,profile,guard,remaining=False):
         # Full route validation issues only FK/IK requests, never trajectory goals.
@@ -190,6 +205,15 @@ class RosArmBackend:
     def prepare(self,surface,profile,guard,feedback):
         planner=self.planner(guard);start=self.measured()
         points,_=planner.plan(start,surface)
+        self.execute_plan(planner,points,start,guard,feedback)
+
+    def transport(self,profile,guard,feedback):
+        planner=self.planner(guard);start=self.measured();normal=profile['vertical_axis']
+        floor=max(planner.floor,min(sum(a*b for a,b in zip(planner.forward(start).position,normal)),
+                    sum(a*b for a,b in zip(profile['transport_position'],normal)),
+                    profile['table_plane_offset_m']+profile['transit_clearance_height_m'])-.003)
+        points,_=planner.joint_transit(start,profile['transport_position'],profile['transport_orientation_xyzw'],
+                                      'MOVE_TO_TRANSPORT_POSE',floor)
         self.execute_plan(planner,points,start,guard,feedback)
 
     def trajectory(self,positions,guard):

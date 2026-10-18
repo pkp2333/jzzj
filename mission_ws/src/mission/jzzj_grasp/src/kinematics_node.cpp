@@ -10,7 +10,7 @@
 
 class Adapter {
   ros::NodeHandle nh_, pnh_{"~"};
-  ros::ServiceServer service_;
+  ros::ServiceServer service_, endpoint_service_;
   KDL::Chain chain_;
   std::unique_ptr<stage_c::SeededIk> solver_;
   std::string urdf_, frame_;
@@ -20,7 +20,7 @@ class Adapter {
     return solver_->forward(std::vector<double>(q.begin(), q.begin()+5));
   }
   bool handle(jzzj_grasp_interfaces::ComputeArmMotion::Request& req,
-              jzzj_grasp_interfaces::ComputeArmMotion::Response& res) {
+              jzzj_grasp_interfaces::ComputeArmMotion::Response& res, bool endpoint=false) {
     res.valid=false;
     try {
       if(req.tcp_target.header.frame_id!=frame_) throw std::runtime_error("unexpected arm frame");
@@ -44,7 +44,8 @@ class Adapter {
           throw std::runtime_error("invalid TCP pose");
         KDL::Rotation rotation=KDL::Rotation::Quaternion(q.x/norm,q.y/norm,q.z/norm,q.w/norm);
         KDL::Frame desired(rotation,KDL::Vector(p.x,p.y,p.z));
-        const auto out=solver_->solve(desired,std::vector<double>(seed.begin(),seed.begin()+5));
+        const auto arm_seed=std::vector<double>(seed.begin(),seed.begin()+5);
+        const auto out=endpoint ? solver_->solveEndpoint(desired,arm_seed) : solver_->solve(desired,arm_seed);
         std::copy(out.begin(),out.end(),solution.begin());
       }
       for(unsigned i=0;i<5;i++) if(solution[i]<low_[i]||solution[i]>high_[i]) throw std::runtime_error("seed/solution limits");
@@ -59,6 +60,10 @@ class Adapter {
     } catch(const std::exception& e){res.reason=e.what();}
     return true;
   }
+  bool incremental(jzzj_grasp_interfaces::ComputeArmMotion::Request& req,
+                   jzzj_grasp_interfaces::ComputeArmMotion::Response& res) {return handle(req,res,false);}
+  bool endpoint(jzzj_grasp_interfaces::ComputeArmMotion::Request& req,
+                jzzj_grasp_interfaces::ComputeArmMotion::Response& res) {return handle(req,res,true);}
 public:
   Adapter(){
     bool calibrated=false;pnh_.param("calibration_confirmed",calibrated,false);
@@ -83,7 +88,8 @@ public:
       low_.push_back(joint->limits->lower);high_.push_back(joint->limits->upper);
     }
     solver_.reset(new stage_c::SeededIk(chain_,low_,high_,KDL::Vector(tcp_[0],tcp_[1],tcp_[2]),policy_));
-    service_=nh_.advertiseService("/stage_c/compute_arm_motion",&Adapter::handle,this);
+    service_=nh_.advertiseService("/stage_c/compute_arm_motion",&Adapter::incremental,this);
+    endpoint_service_=nh_.advertiseService("/stage_c/compute_arm_endpoint",&Adapter::endpoint,this);
   }
 };
 int main(int argc,char**argv){ros::init(argc,argv,"stage_c_kinematics");try{Adapter a;ros::spin();}catch(const std::exception&e){ROS_FATAL("%s",e.what());return 1;}return 0;}
