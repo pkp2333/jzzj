@@ -2,7 +2,8 @@
 import time
 import logging
 from dataclasses import dataclass
-from servo_protocol import (POSITION_MIN, POSITION_MAX, validate_position_range,
+from servo_protocol import (POSITION_MIN, POSITION_MAX,
+    FEEDBACK_POSITION_MIN, FEEDBACK_POSITION_MAX, validate_position_range,
     validate_servo_id, angle_to_position, position_to_angle, duration_bytes)
 
 LOGGER=logging.getLogger(__name__)
@@ -71,9 +72,9 @@ class CheckedArmDevice:
                 any(type(v) is not int or not 0<=v<=255 for v in packet[:3])):
             raise OSError('servo {} malformed position feedback'.format(servo_id))
         position=(packet[1]<<8)|packet[2]
-        if not self.position_min<=position<=self.position_max:
+        if not FEEDBACK_POSITION_MIN<=position<=FEEDBACK_POSITION_MAX:
             raise OSError('servo {} invalid feedback position {}; expected {}..{}'.format(
-                servo_id,position,self.position_min,self.position_max))
+                servo_id,position,FEEDBACK_POSITION_MIN,FEEDBACK_POSITION_MAX))
         return position_to_angle(servo_id,position,self.left)
 
     @property

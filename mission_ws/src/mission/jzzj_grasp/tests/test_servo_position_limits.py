@@ -86,19 +86,25 @@ class ServoPositionTests(unittest.TestCase):
             degrees=position_to_angle(servo_id,96,True)
             self.sdk.Arm_serial_servo_write(servo_id,degrees,800)
             self.assertEqual(self.calls[-1],(0x10,0x19,[servo_id,0,96,3,32]))
-    def test_raw_zero_feedback_is_rejected_before_degree_conversion(self):
-        self.sdk.bus.bus.positions[4]=0
-        with self.assertRaisesRegex(OSError,'servo 5.*position 0'):
-            self.sdk.Arm_serial_servo_read(5)
+    def test_feedback_above_receive_limit_is_rejected_before_degree_conversion(self):
+        for value in (4097,65535):
+            self.sdk.bus.bus.positions[4]=value
+            with self.assertRaisesRegex(OSError,'servo 5.*expected 0..4096'):
+                self.sdk.Arm_serial_servo_read(5)
         self.assertTrue(all(call[1]==0x37 for call in self.calls))
     def test_feedback_boundaries_and_mapping_round_trip_for_both_arms(self):
         for left in (False,True):
             sdk=boundary.CheckedArmDevice(lr='left' if left else 'right',factory=ClippingVendor)
             for servo_id in range(1,7):
-                for value in (96,1000,2000,4000):
+                for value in (0,95,96,1000,2000,4000,4001,4096):
                     sdk.bus.bus.positions[servo_id-1]=value
                     angle=sdk.Arm_serial_servo_read(servo_id)
                     self.assertEqual(angle_to_position(servo_id,angle,left),value)
+    def test_receive_range_does_not_follow_narrowed_command_range(self):
+        sdk=boundary.CheckedArmDevice(factory=ClippingVendor,position_min=1000,position_max=3000)
+        for value in (0,999,3001,4096):
+            sdk.bus.bus.positions[4]=value
+            self.assertEqual(angle_to_position(5,sdk.Arm_serial_servo_read(5),True),value)
     def test_limits_derived_from_raw_units_and_calibrated_signs(self):
         signs=[1,-1,1,1,1,1];offsets=[0.]*6
         low,high=joint_limits(signs,offsets)

@@ -1,8 +1,10 @@
-"""Servo position units (not degrees): reject outside 96..4000, never clip."""
+"""Servo position units: send 96..4000, receive 0..4096, never clip."""
 import math
 
 POSITION_MIN = 96
 POSITION_MAX = 4000
+FEEDBACK_POSITION_MIN = 0
+FEEDBACK_POSITION_MAX = 4096
 
 
 def validate_position_range(lower, upper):
