@@ -5,7 +5,7 @@ import time
 import signal
 import numpy as np
 from arm_motions import *
-from Arm_Lib import Arm_Device
+from checked_arm_sdk import CheckedArmDevice as Arm_Device
 
 import rospy
 import tf2_ros
@@ -288,7 +288,7 @@ def main():
 
 #另粘一份进行修改
         elif command in ["g1","g2","g3","g4","g5","g6","b1","b2","b3","b4","b5","b6"]:#增加"g6"
-            servo_limit = [[-130,130],[-40,60],[30,120],[30,120],[-90,90],[20,140]]
+            servo_limit = Arm.servo_degree_limits
             '''curr_ang = []
             for i in range(6):
                 a = Arm.Arm_serial_servo_read(i+1) - delta_servo[i]

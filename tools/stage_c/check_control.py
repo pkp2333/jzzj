@@ -17,12 +17,14 @@ def validate_launch_parameters(params):
             raise ValueError('missing true private parameter: ' + arm + key)
     sys.path.insert(0, str(ROOT/'catkin_ws/src/actuator/arm/scripts'))
     from trajectory_safety import validate_mapping
+    from servo_protocol import joint_limits
     def config(key):
         if arm + key not in params:
             raise ValueError('missing private parameter: ' + arm + key)
         return params[arm + key]
-    for lower, upper in (('joint_lower_rad', 'joint_upper_rad'), ('sdk_lower_deg', 'sdk_upper_deg')):
-        validate_mapping(config('servo_signs'), config('servo_offsets_deg'), config(lower), config(upper))
+    signs=config('servo_signs');offsets=config('servo_offsets_deg')
+    lower,upper=joint_limits(signs,offsets,config('servo_position_min'),config('servo_position_max'),left=True)
+    validate_mapping(signs,offsets,lower,upper)
     if params.get('/stage_c_server/backend') != 'real':
         raise ValueError('real backend required')
     for key in ('real_motion_enabled', 'robot_calibration_confirmed',

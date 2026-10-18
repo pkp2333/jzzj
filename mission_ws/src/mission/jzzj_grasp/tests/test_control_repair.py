@@ -19,11 +19,17 @@ class Bus:
     def __init__(self):
         self.fail = False
         self.calls = []
+        self.selected = 1
 
     def write_i2c_block_data(self, *args):
         self.calls.append(args)
         if self.fail:
             raise OSError(121, 'remote I/O error')
+        if args[1]==0x37:self.selected=args[2][0]
+
+    def read_i2c_block_data(self,*args):
+        if self.fail:raise OSError(121,'remote I/O error')
+        return [0,9,105]+[0]*29  # position 2409, approximately 30 degrees for servo 1.
 
 
 class SwallowingVendor:
@@ -55,7 +61,7 @@ class SdkBoundaryTests(unittest.TestCase):
     def setUp(self):
         self.sdk = CheckedArmDevice(factory=SwallowingVendor)
 
-    def test_swallowed_write_exception_is_raised_even_with_normal_return(self):
+    def test_write_exception_is_not_hidden(self):
         self.sdk.bus.bus.fail = True
         with self.assertRaises(OSError):
             self.sdk.Arm_serial_servo_write6(0, 0, 0, 0, 0, 60, 800)
@@ -75,12 +81,13 @@ class SdkBoundaryTests(unittest.TestCase):
         with self.assertRaises(OSError):
             self.sdk.Arm_serial_servo_read(1)
         self.sdk.bus.bus.fail = False
-        self.assertEqual(self.sdk.Arm_serial_servo_read(1), 30)
+        self.assertAlmostEqual(self.sdk.Arm_serial_servo_read(1), 30, delta=.05)
 
-    def test_joint_order_and_duration_are_forwarded_unchanged(self):
+    def test_joint_order_and_duration_are_encoded_in_the_expected_registers(self):
         args = (89, 3, 90, 90, 4, 60, 800)
         self.sdk.Arm_serial_servo_write6(*args)
-        self.assertEqual(self.sdk.bus.bus.calls[-1], (0x10, 0x1d, list(args)))
+        self.assertEqual(self.sdk.bus.bus.calls,[(0x10,0x1e,[3,32]),
+            (0x10,0x1d,[12,62,7,171,3,132,3,132,8,41,9,63])])
 
 
 class PreflightTests(unittest.TestCase):
@@ -88,8 +95,7 @@ class PreflightTests(unittest.TestCase):
         arm = '/arm_left/arm_trajectory/'
         self.params = {arm+k: True for k in ('hardware_enabled','calibration_confirmed','workspace_clear_confirmed')}
         self.params.update({arm+'servo_signs':[1,-1,1,1,1,1], arm+'servo_offsets_deg':[0]*6,
-                            arm+'joint_lower_rad':[-2]*6, arm+'joint_upper_rad':[2]*6,
-                            arm+'sdk_lower_deg':[-100]*6, arm+'sdk_upper_deg':[100]*6,
+                            arm+'servo_position_min':96, arm+'servo_position_max':4000,
                             arm+'feedback_timeout':1.5, arm+'stop_timeout':5.,
                             '/stage_c_server/backend':'real',
                             '/stage_c_kinematics/calibration_confirmed':True,
@@ -120,6 +126,11 @@ class PreflightTests(unittest.TestCase):
         self.params['/stage_c_server/execution/stop_timeout'] = 8.
         with self.assertRaisesRegex(ValueError, 'stop_timeout'):
             preflight.validate_launch_parameters(self.params)
+
+    def test_invalid_position_bounds_are_rejected(self):
+        for value in (0,95,4000,96.):
+            self.params['/arm_left/arm_trajectory/servo_position_min']=value
+            with self.assertRaises(ValueError):preflight.validate_launch_parameters(self.params)
 
     def test_disabled_execution_blocks_real_launch(self):
         self.params['/stage_c_server/execution/real_motion_enabled'] = False

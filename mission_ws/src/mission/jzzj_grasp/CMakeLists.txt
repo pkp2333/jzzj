@@ -24,6 +24,7 @@ if(CATKIN_ENABLE_TESTING)
   add_test(NAME stage_c_fruit6 COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fruit6.py)
   add_test(NAME stage_c_ros_contracts COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_ros_contracts.py)
   add_test(NAME stage_c_control_repair COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_control_repair.py)
+  add_test(NAME stage_c_servo_positions COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_servo_position_limits.py)
   add_test(NAME stage_c_hold_confirmation COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_hold_confirmation.py)
   add_test(NAME stage_c_grasp_planning COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_grasp_planning.py)
   add_test(NAME stage_c_planning_kdl COMMAND ${CMAKE_COMMAND} -E env

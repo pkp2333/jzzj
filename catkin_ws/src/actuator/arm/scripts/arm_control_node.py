@@ -6,7 +6,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import time
 import numpy as np
 from threading import Lock
-from Arm_Lib import Arm_Device
+from checked_arm_sdk import CheckedArmDevice as Arm_Device
 from arm_motions import radians_list
 
 import rospy

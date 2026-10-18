@@ -11,6 +11,7 @@ import actionlib
 from sensor_msgs.msg import JointState
 from control_msgs.msg import (FollowJointTrajectoryAction,FollowJointTrajectoryResult,FollowJointTrajectoryFeedback)
 from trajectory_safety import validate_mapping,validate_target,encode,decode
+from servo_protocol import joint_limits
 
 class TrajectoryDriver:
     def __init__(self):
@@ -19,10 +20,13 @@ class TrajectoryDriver:
             raise ValueError('hardware/calibration/workspace gates must be explicitly confirmed')
         self.names=['joint'+str(i) for i in range(1,7)]
         self.signs=rospy.get_param('~servo_signs');self.offsets=rospy.get_param('~servo_offsets_deg')
-        self.lower=rospy.get_param('~joint_lower_rad');self.upper=rospy.get_param('~joint_upper_rad')
+        self.position_min=rospy.get_param('~servo_position_min',96)
+        self.position_max=rospy.get_param('~servo_position_max',4000)
+        self.lower,self.upper=joint_limits(self.signs,self.offsets,self.position_min,self.position_max,left=True)
         validate_mapping(self.signs,self.offsets,self.lower,self.upper)
-        self.raw_lower=rospy.get_param('~sdk_lower_deg');self.raw_upper=rospy.get_param('~sdk_upper_deg')
-        validate_mapping(self.signs,self.offsets,self.raw_lower,self.raw_upper)
+        # Runtime diagnostics for the planner; the six servo limits have one
+        # source of truth in raw position units, not a second degree table.
+        rospy.set_param('~joint_lower_rad',self.lower);rospy.set_param('~joint_upper_rad',self.upper)
         self.tolerance=rospy.get_param('~position_tolerance_rad',.035)
         self.freshness=rospy.get_param('~feedback_timeout',1.5)
         self.read_period=rospy.get_param('~feedback_period',.1)
@@ -40,7 +44,7 @@ class TrajectoryDriver:
         from checked_arm_sdk import CheckedArmDevice
         from hardware_lease import HardwareLease
         self.lease=HardwareLease('left')
-        self.device=CheckedArmDevice(lr='left')
+        self.device=CheckedArmDevice(lr='left',position_min=self.position_min,position_max=self.position_max)
         self.read_duration=0.
         self.pub=rospy.Publisher('/arm_left/joint_states',JointState,queue_size=1)
         self.read()
@@ -62,7 +66,7 @@ class TrajectoryDriver:
             with self.io:
                 started=time.monotonic();stamp=rospy.Time.now()
                 raw=[self.device.Arm_serial_servo_read(i+1) for i in range(6)]
-            if any(v is None or not math.isfinite(v) or not lo<=v<=hi for v,lo,hi in zip(raw,self.raw_lower,self.raw_upper)):
+            if any(v is None or not math.isfinite(v) for v in raw):
                 raise ValueError('invalid SDK feedback')
             q=decode(raw,self.signs,self.offsets)
             validate_target(self.names,q,self.names,self.lower,self.upper)
@@ -86,9 +90,8 @@ class TrajectoryDriver:
             return list(self.current),self.sequence
 
     def write(self,q,seconds):
+        validate_target(self.names,q,self.names,self.lower,self.upper)
         raw=encode(q,self.signs,self.offsets)
-        if any(not lo<=v<=hi for v,lo,hi in zip(raw,self.raw_lower,self.raw_upper)):
-            raise ValueError('SDK target outside calibrated range')
         with self.io:
             self.device.Arm_serial_servo_write6(*raw,int(seconds*1000))
 
