@@ -80,6 +80,13 @@ public:
         throw std::runtime_error("IK limit: " + jointError(i, q, low_[i], high_[i]));
       candidate[i] = std::max(low_[i], std::min(high_[i], q));
       if (std::abs(candidate[i] - seed[i]) > policy_.max_joint_step) {
+        // Subtraction at a solver bound may add a few ULPs (field: -0.35).
+        // Project numerical noise inward; do not enlarge the continuity limit.
+        if (std::abs(candidate[i] - seed[i]) <= policy_.max_joint_step + 1e-12) {
+          while (std::abs(candidate[i] - seed[i]) > policy_.max_joint_step)
+            candidate[i] = std::nextafter(candidate[i], seed[i]);
+          continue;
+        }
         std::ostringstream s;
         s << "IK continuity: joint" << i + 1 << " delta=" << candidate[i] - seed[i]
           << " rad exceeds " << policy_.max_joint_step;

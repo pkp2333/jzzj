@@ -2,6 +2,7 @@
 #include <tinyxml2.h>
 #include <functional>
 #include <iostream>
+#include <iomanip>
 #include <limits>
 
 namespace {
@@ -43,8 +44,31 @@ void rejects(const std::function<void()>& f,const std::string& expected) {
 }
 int main(int argc,char** argv) {
   try {
-    require(argc==2,"expected URDF path");Robot robot(argv[1]);stage_c::IkPolicy policy;
+    require(argc==2 || argc==3,"expected URDF path [--query]");Robot robot(argv[1]);stage_c::IkPolicy policy;
     stage_c::SeededIk ik(robot.chain,robot.low,robot.high,KDL::Vector(.053,.079,-.051),policy);
+    if(argc==3) {
+      require(std::string(argv[2])=="--query","unknown option");
+      // Persistent, hardware-free FK/IK bridge for Python planner regressions.
+      std::string line;
+      while(std::getline(std::cin,line)) {
+        try {
+          std::istringstream input(line);char op;input>>op;
+          require(op=='F' || op=='I',"invalid query operation");
+          std::vector<double> q(5);for(auto& v:q) require(bool(input>>v),"invalid query seed");
+          if(op=='I') {
+            double x,y,z,qx,qy,qz,qw;
+            require(bool(input>>x>>y>>z>>qx>>qy>>qz>>qw),"invalid query target");
+            q=ik.solve(KDL::Frame(KDL::Rotation::Quaternion(qx,qy,qz,qw),KDL::Vector(x,y,z)),q);
+          }
+          auto pose=ik.forward(q);double x,y,z,w;pose.M.GetQuaternion(x,y,z,w);
+          std::cout<<std::setprecision(17)<<"OK "<<pose.p.x()<<' '<<pose.p.y()<<' '<<pose.p.z()
+                   <<' '<<x<<' '<<y<<' '<<z<<' '<<w;
+          for(auto v:q)std::cout<<' '<<v;
+          std::cout<<std::endl;
+        } catch(const std::exception& e) {std::cout<<"ERROR "<<e.what()<<std::endl;}
+      }
+      return 0;
+    }
     const double deg=std::acos(-1.)/180.;
     std::vector<double> seed={89*deg,-3*deg,90*deg,90*deg,-deg};
     const auto desired=ik.forward(seed);
@@ -53,6 +77,12 @@ int main(int argc,char** argv) {
     auto result=ik.solve(desired,seed);
     for(unsigned i=0;i<5;++i)require(std::abs(result[i]-seed[i])<1e-6,"same-pose solution changed measured joint");
     ++cases;
+    // Field bounded solve ended exactly at -0.35 rad, represented just beyond
+    // the boundary by subtraction. This must not turn a legal step into failure.
+    auto boundary=seed;boundary[3]-=policy.max_joint_step;
+    auto boundary_pose=ik.forward(boundary);
+    result=ik.validateCandidate(boundary_pose,seed,boundary);
+    require(std::abs(result[3]-seed[3])<=policy.max_joint_step,"boundary step exceeds hard continuity limit");++cases;
     std::vector<double> vendor={88.9999984206*deg,-3.01921233689*deg,90.0193180979*deg,89.9792241678*deg,-1.00011011113*deg};
     result=ik.validateCandidate(desired,seed,vendor);
     require(result[2]==robot.high[2],"numeric overshoot did not project to hard upper limit");++cases;
