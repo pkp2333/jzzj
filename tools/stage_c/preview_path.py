@@ -29,10 +29,12 @@ def main():
         backend.fresh_joints()
     try:
         start=backend.measured()
-        prefix,route=backend.planner(guard).plan(start,args.surface)
+        planner=backend.planner(guard)
+        prefix,route=planner.plan(start,args.surface)
         print(json.dumps({'valid':True,'read_only':True,'surface_m':args.surface,
                           'start_rad':start,'approach_points':len(prefix),
                           'total_points':len(route),'steps':sorted(set(p.step for p in route)),
+                          'orientation_search':planner.orientation_search,
                           'scope':'joint limits, IK/FK, swept TCP workspace/table; no mesh/scene collision proof'},indent=2))
         return 0
     except Failure as exc:

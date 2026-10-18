@@ -59,6 +59,30 @@ class ActualKdlPlanningTests(unittest.TestCase):
     def test_original_distant_target_remains_rejected_with_downward_profile(self):
         start=self.field_downward_profile()
         with self.assertRaises(Failure):self.planner().plan(start,(-.20205,.08196,-.05))
+
+    def test_yaw_search_recovers_field_target_without_tilt_or_looser_precision(self):
+        self.field_downward_profile()
+        start=(-1.0900948002817594,-.4855188646456953,.022847946571562187,
+               .6226065440750681,1.118482685705764,.008567979964335944)
+        surface=(-.19628,.02469,-.05)
+        with self.assertRaises(Failure):self.planner().plan(start,surface)
+        p=self.cfg['profiles']['tabletop'];transport=list(p['transport_orientation_xyzw'])
+        p.update(grasp_yaw_search_enabled=True,grasp_yaw_samples=12)
+        planner=self.planner();prefix,route=planner.plan(start,surface)
+        self.assertTrue(prefix);self.assertLessEqual(len(route),self.cfg['max_motion_steps'])
+        self.assertEqual(planner.orientation_search['attempted'],12)
+        x,y,z,w=planner.selected_orientation
+        self.assertAlmostEqual(2*(x*z-w*y),-1.)
+        for point in route:
+            self.assertEqual(point.joints[5],start[5])
+            planner.valid_joints(point.joints)
+        self.assertEqual(p['transport_orientation_xyzw'],transport)
+
+    def test_yaw_search_still_rejects_distant_field_target(self):
+        start=self.field_downward_profile()
+        self.cfg['profiles']['tabletop'].update(grasp_yaw_search_enabled=True,grasp_yaw_samples=12)
+        with self.assertRaisesRegex(Failure,'no complete validated route'):
+            self.planner().plan(start,(-.25043,.0634,-.05))
     def test_field_pose_rejects_before_any_open_or_arm_command(self):
         self.cfg=json.loads((ROOT/'deploy/stage_c.yaml').read_text(encoding='utf-8'))['execution']
         self.cfg['active_profile']='tabletop'

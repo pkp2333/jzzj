@@ -90,6 +90,13 @@ def validate_config(cfg):
         value=cfg.get(key,default)
         if not math.isfinite(value) or not 0<value<=upper:raise ValueError('invalid '+key)
     for p in cfg['profiles'].values():
+        if type(p.get('grasp_yaw_search_enabled',False)) is not bool:
+            raise ValueError('grasp_yaw_search_enabled must be boolean')
+        samples=p.get('grasp_yaw_samples',12);budget=p.get('grasp_yaw_search_timeout',25.)
+        if type(samples) is not int or not 4<=samples<=24:
+            raise ValueError('grasp_yaw_samples must be integer 4..24')
+        if isinstance(budget,bool) or not isinstance(budget,(int,float)) or not math.isfinite(budget) or not 0<budget<=60:
+            raise ValueError('grasp_yaw_search_timeout must be 0..60 seconds')
         if p.get('transit_mode','cartesian') not in ('cartesian','joint'):raise ValueError('invalid transit_mode')
         if p.get('transit_mode')=='joint':
             rotation=p.get('transport_orientation_xyzw',[])
@@ -110,6 +117,11 @@ def validate_config(cfg):
         if not all(math.isfinite(p[k]) for k in ('open_rad','closed_rad','transit_clearance_height_m')):raise ValueError('nonfinite profile')
         if p['open_rad']==p['closed_rad']:raise ValueError('distinct gripper setpoints required')
         if not finite_vector(p['vertical_axis'],3) or abs(dot(p['vertical_axis'],p['vertical_axis'])-1)>1e-5:raise ValueError('unit upward table normal required')
+        if p.get('grasp_yaw_search_enabled',False):
+            x,y,z,w=p['orientation_xyzw']
+            approach=(1-2*(y*y+z*z),2*(x*y+w*z),2*(x*z-w*y))
+            if p.get('transit_mode')!='joint' or dot(approach,p['vertical_axis'])>-.9999:
+                raise ValueError('downward yaw search requires joint transit and tool +X toward table')
         if not all(math.isfinite(p[k]) for k in ('table_plane_offset_m','min_object_height_m','max_object_height_m')) or not 0<=p['min_object_height_m']<p['max_object_height_m']:
         # min=0 is legal: plane-mode observations sit exactly on the calibrated plane.
             raise ValueError('explicit table plane and object-height band required')

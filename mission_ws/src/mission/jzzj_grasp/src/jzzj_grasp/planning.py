@@ -5,12 +5,24 @@ obstacles or mesh self-collision. Joint escape waypoints require separate field
 calibration; no unverified home pose is invented here.
 """
 import math
+import copy
+import time
 from dataclasses import dataclass
 from .core import Failure, finite_vector, distance, dot, add_scaled
 
 
 def quaternion_angle(a, b):
     return 2*math.acos(min(1., abs(dot(a, b))))
+
+
+def tool_x_rotation(q, angle):
+    """Postmultiply by local-X rotation; the tool approach axis stays fixed."""
+    x,y,z,w=q; s,c=math.sin(angle/2),math.cos(angle/2)
+    return (x*c+w*s, y*c+z*s, z*c-y*s, w*c-x*s)
+
+
+class _SearchDeadline(Exception):
+    pass
 
 
 def slerp(a, b, t):
@@ -50,6 +62,53 @@ class PathPlanner:
         self.max_joint_step = cfg.get('planning_joint_step_rad', .35)
         self.max_rotation_step = cfg.get('planning_rotation_step_rad', .1)
         self.count = 0
+        self.selected_orientation = None
+        self.orientation_search = None
+
+    def search_grasp_orientation(self, start, surface):
+        """Try complete routes, never just endpoint IK. No command callbacks."""
+        p=self.profile; samples=p.get('grasp_yaw_samples',12)
+        deadline=time.monotonic()+p.get('grasp_yaw_search_timeout',25.)
+        attempted=0; rejected=[]; best=None; expired=False
+        def guard():
+            self.guard()  # Cancellation, feedback and outer deadline take priority.
+            if time.monotonic()>deadline:raise _SearchDeadline()
+        # Closest to the configured orientation first, then cover a full turn.
+        indices=sorted(range(samples),key=lambda i:min(i,samples-i))
+        for i in indices:
+            try:
+                guard(); attempted+=1
+                rotation=tool_x_rotation(p['orientation_xyzw'],2*math.pi*i/samples)
+                cfg=copy.deepcopy(self.cfg);profile=cfg['profiles'][cfg['active_profile']]
+                profile['orientation_xyzw']=list(rotation);profile['_grasp_yaw_selected']=True
+                trial=PathPlanner(cfg,self.lower,self.upper,self.forward,self.inverse,guard,self.endpoint_inverse)
+                prefix,route=trial.plan(start,surface)
+                previous=start;travel=0.;margin=1.
+                for point in route:
+                    travel+=math.sqrt(sum((a-b)**2 for a,b in zip(previous[:5],point.joints[:5])))
+                    margin=min(margin,*(min(v-lo,hi-v)/(hi-lo) for v,lo,hi in
+                                      zip(point.joints[:5],self.lower[:5],self.upper[:5])))
+                    previous=point.joints
+                # Prefer little motion and clearance from hard limits.
+                score=travel+.1/(margin+.02)
+                if best is None or score<best[0]:best=(score,rotation,prefix,route,travel,margin)
+            except _SearchDeadline:
+                expired=True;break
+            except Failure as exc:
+                if exc.code!='NEEDS_REPOSITION':raise
+                rejected.append(str(exc))
+        self.guard()
+        if best is None:
+            code='TIMEOUT' if expired else 'NEEDS_REPOSITION'
+            raise Failure(code,'downward yaw search: no complete validated route ({}/{} candidates{}); {}'.format(
+                attempted,samples,', search budget reached' if expired else '',
+                rejected[-1] if rejected else 'no candidate completed'))
+        _,rotation,prefix,route,travel,margin=best
+        self.selected_orientation=rotation;self.count=len(route)
+        self.orientation_search={'attempted':attempted,'samples':samples,'budget_reached':expired,
+                                 'orientation_xyzw':list(rotation),'travel_rad':travel,
+                                 'minimum_limit_margin_fraction':margin,'route_points':len(route)}
+        return prefix,route
 
     def valid_joints(self, q):
         if (not finite_vector(q, 6) or len(self.lower) != 6 or len(self.upper) != 6 or
@@ -162,6 +221,9 @@ class PathPlanner:
 
     def plan(self, start, surface, remaining=False):
         """Validate through transport before opening; return approach prefix only."""
+        if self.profile.get('grasp_yaw_search_enabled',False) and not self.profile.get('_grasp_yaw_selected',False):
+            if remaining:raise Failure('NOT_READY','grasp orientation must be selected before descent')
+            return self.search_grasp_orientation(start,surface)
         p = self.profile; q = tuple(start); self.valid_joints(q)
         self.valid_pose(self.forward(q), self.floor)
         prefix = []; all_points = []

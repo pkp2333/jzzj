@@ -64,6 +64,9 @@
         "calibrated": false,
         "transition_calibrated": false,
         "transition_joint_waypoints_rad": [],
+        "grasp_yaw_search_enabled": true,
+        "grasp_yaw_samples": 12,
+        "grasp_yaw_search_timeout": 25.0,
         "orientation_xyzw": [
           0,
           0.7071067811865476,

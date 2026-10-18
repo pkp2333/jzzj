@@ -187,7 +187,17 @@ class RosArmBackend:
 
     def preflight(self,surface,profile,guard,remaining=False):
         # Full route validation issues only FK/IK requests, never trajectory goals.
-        self.planner(guard).plan(self.measured(),surface,remaining)
+        planner=self.planner(guard)
+        planner.plan(self.measured(),surface,remaining)
+        if planner.selected_orientation is not None:
+            guard()
+            # Engine and backend share this goal's private profile. Freeze the
+            # choice for prepare, visual correction, descent and lift; transport
+            # keeps its independent orientation. Never mutate the server default.
+            profile['orientation_xyzw']=list(planner.selected_orientation)
+            profile['_grasp_yaw_selected']=True
+            self.orientation_search=planner.orientation_search
+            self.rospy.loginfo('stage C downward orientation selected: %s',planner.orientation_search)
 
     def execute_plan(self,planner,points,start,guard,feedback):
         expected=tuple(start)
