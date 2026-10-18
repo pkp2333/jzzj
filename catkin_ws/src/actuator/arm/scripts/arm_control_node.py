@@ -4,8 +4,9 @@ import os
 import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import time
+import math
 import numpy as np
-from threading import Lock
+from threading import Lock, RLock
 from Arm_Lib import Arm_Device
 from arm_motions import radians_list
 
@@ -42,6 +43,7 @@ class ArmNode:
         from hardware_lease import HardwareLease
         self.hardware_lease = HardwareLease(arm_dir)
         self.Arm = Arm_Device(lr=arm_dir)
+        self.io_lock = RLock()
         time.sleep(.01)
 
         ang = [0, 0, 0, 0, 0, 0]
@@ -99,6 +101,7 @@ class ArmNode:
         self.arm_servo_degree_sub = rospy.Subscriber("arm_joint_states", JointState, self.arm_servo_degree_cb, queue_size=1)
         self.arm_torque_sub = rospy.Subscriber("arm_torque_state", Bool, self.arm_torque_cb, queue_size=1)
         self.arm_servo_degree_pub = rospy.Publisher("joint_states", JointState, queue_size=3)
+        self.raw_degree_pub = rospy.Publisher("raw_joint_states", JointState, queue_size=3)
         
         self.control_timer = rospy.Timer(rospy.Duration(0.02), self.controller)
 
@@ -110,7 +113,19 @@ class ArmNode:
         print("\n机械臂控制节点成功结束\n")
 
     def arm_torque_cb(self, msg:Bool):
-        self.torque_on = msg.data
+        # The controller is the only SDK owner, including manual torque changes.
+        with self.io_lock:
+            if not msg.data:
+                with self.lock:
+                    self.servo_degree_lists.clear()
+                    self.last_servo_degree = None
+                    self.last_same_cnt = 0
+            try:
+                self.Arm.Arm_serial_set_torque(int(msg.data))
+                self.torque_on = msg.data
+            except Exception as exc:
+                self.torque_on = False
+                rospy.logerr("Arm torque command failed: %s", exc)
 
     def arm_servo_degree_cb(self, msg:JointState):
         with self.lock:
@@ -135,6 +150,13 @@ class ArmNode:
             
 
     def controller(self, *args):
+        with self.io_lock:
+            try:
+                self._controller()
+            except Exception as exc:
+                rospy.logerr_throttle(2., "Arm write failed: %s", exc)
+
+    def _controller(self):
         if not self.task or not self.torque_on or not len(self.servo_degree_lists):
             return
                         
@@ -156,22 +178,32 @@ class ArmNode:
             time.sleep(.05)
         
     def read_deg(self, *args):
-        if self.torque_on:
-            degree = [0, 0, 0, 0, 0, 0]
-            for i in range(6):
-                ang = self.Arm.Arm_serial_servo_read(i + 1)
-                if ang is not None:
-                    degree[i] = ang - self.delta_servo[i]
-                else:
-                    print("第" + str(i + 1) + "号舵机角度超限")
-                    return
-                degree[1] *= -1
-                time.sleep(.005)
-
+        # Keep feedback available while torque is off for manual pose teaching.
+        try:
+            with self.io_lock:
+                raw = []
+                for i in range(6):
+                    ang = self.Arm.Arm_serial_servo_read(i + 1)
+                    if ang is None or not math.isfinite(ang):
+                        rospy.logerr_throttle(2., "Arm servo %d returned no valid angle; check SDK communication and competing processes", i + 1)
+                        return
+                    raw.append(ang)
+                    time.sleep(.005)
+            # Inverse of the legacy controller's existing write mapping.
+            degree = [a - offset for a, offset in zip(raw, self.delta_servo)]
+            degree[1] *= -1
+            degree[5] = -raw[5]
+            stamp = rospy.Time.now()
+            raw_msg = JointState()
+            raw_msg.name = self.servo_degree.name
+            raw_msg.position = radians_list(raw)
+            raw_msg.header.stamp = stamp
+            self.raw_degree_pub.publish(raw_msg)
             self.servo_degree.position = radians_list(degree)
-            self.servo_degree.header.stamp = rospy.Time.now()
+            self.servo_degree.header.stamp = stamp
             self.arm_servo_degree_pub.publish(self.servo_degree)
-            time.sleep(.05)
+        except Exception as exc:
+            rospy.logerr_throttle(2., "Arm feedback read failed: %s", exc)
 
 
 if __name__ == '__main__':

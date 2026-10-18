@@ -3,9 +3,9 @@
 import sys
 import time
 import signal
+import math
 import numpy as np
 from arm_motions import *
-from Arm_Lib import Arm_Device
 
 import rospy
 import tf2_ros
@@ -18,6 +18,20 @@ from geometry_msgs.msg import PoseStamped
 saved_joint_angles = [0, 0, 90, 90, 0]
 arm_ik_servo_degree = JointState()
 get_cmd_ik = False
+
+
+def read_feedback(topic="joint_states", timeout=2.0):
+    msg = rospy.wait_for_message(topic, JointState, timeout=timeout)
+    names = ["joint%d" % i for i in range(1, 7)]
+    if (len(msg.name) != 6 or len(set(msg.name)) != 6 or set(msg.name) != set(names)
+            or len(msg.position) != 6 or not all(math.isfinite(v) for v in msg.position)):
+        raise ValueError("invalid six-joint feedback")
+    stamp = msg.header.stamp.to_sec()
+    age = (rospy.Time.now() - msg.header.stamp).to_sec()
+    if stamp <= 0 or not -.05 <= age <= .5:
+        raise ValueError("stale joint feedback")
+    values = dict(zip(msg.name, msg.position))
+    return [float(np.rad2deg(values[n])) for n in names]
 
 def dh_matrix(theta, d, a, alpha):
     ct = np.cos(theta)
@@ -100,14 +114,12 @@ def main():
     arm_back = rospy.get_param('turn_back', -90)
     claw_tight = rospy.get_param('claw_tight', 30)
     claw_loose = rospy.get_param('claw_loose', 60)
-    delta_servo = [rospy.get_param('delta_servo_%d'%i, 0) for i in range(1,7)]
 
     tf_buffer = tf2_ros.Buffer()
     tf_listener = tf2_ros.TransformListener(tf_buffer)
     
     rospy.loginfo("机械臂测试节点初始化中...")
-    Arm = Arm_Device(lr=arm_dir)
-    time.sleep(0.01)
+    # All SDK access belongs to arm_control_node; this process only uses ROS.
 
     arm_servo_degree = JointState()
     arm_servo_degree.name = ["joint1","joint2","joint3","joint4","joint5","joint6"]
@@ -128,33 +140,31 @@ def main():
         command = input('\n代号       指令\n\ntoff      关闭力矩\nton       打开力矩\nrd        读取角度\nrp        读取末端位姿\nstd       设定角度\nstp       设定末端位姿\nwf        前转待命\nwm        居中待命\nwb        后转待命\ng         抓取\np         放置\nq         退出\ng1~g6     对应舵机+8度\nb1~b6     对应舵机-8度\nok        一键抓取复位\na  手动输入摆动角度\nb  收回待命\n\n>>>')
                         
         if command == "toff":
-            Arm.Arm_serial_set_torque(0)
+            arm_torque_pub.publish(Bool(False))
             time.sleep(0.5)
-            print("\n力矩已关闭")
+            print("\n已发送关闭力矩请求，请检查控制节点日志")
             
         elif command == "ton":
-            Arm.Arm_serial_set_torque(1)
+            arm_torque_pub.publish(Bool(True))
             time.sleep(0.5)
-            print("\n力矩已开启")
+            print("\n已发送开启力矩请求，请检查控制节点日志")
 
         elif command == "rd":
             print("\n读取角度")
-            Arm.Arm_serial_set_torque(0)
-            input("\n调整到位后按回车")
             arm_torque_pub.publish(Bool(False))
             time.sleep(0.5)
-            ang = [0]*6
-            for i in range(6):
-                ang[i] = Arm.Arm_serial_servo_read(i+1)
-                if ang[i] is not None:
-                    print("舵机%d: %.1f 度" % (i+1, ang[i]-delta_servo[i]))
-                    #Arm.Arm_serial_servo_write(i+1, ang[i], 800)
-                    time.sleep(0.1)
-            print("\n[%s]" % ", ".join(map(str, ang)))
-            Arm.Arm_serial_set_torque(1)
-            time.sleep(0.5)
-            arm_torque_pub.publish(Bool(True))
-            print("\n力矩已开启")
+            try:
+                input("\n调整到位后按回车")
+                raw = read_feedback("raw_joint_states")
+                curr_ang = read_feedback()
+                for i, angle in enumerate(raw):
+                    print("舵机%d: SDK原始 %.1f 度, ROS关节 %.1f 度" % (i + 1, angle, curr_ang[i]))
+                print("\nROS关节角度: %s" % curr_ang)
+            except (rospy.ROSException, ValueError) as exc:
+                print("\n读取失败: %s；请检查 arm_control_node 是否运行及其 SDK 日志" % exc)
+            finally:
+                arm_torque_pub.publish(Bool(True))
+                print("\n已发送开启力矩请求")
             
         elif command == "rp":
             trans = tf_buffer.lookup_transform('car_base_link', '%slink5'%arm_ns[1:], rospy.Time(0))
@@ -289,18 +299,17 @@ def main():
 #另粘一份进行修改
         elif command in ["g1","g2","g3","g4","g5","g6","b1","b2","b3","b4","b5","b6"]:#增加"g6"
             servo_limit = [[-130,130],[-40,60],[30,120],[30,120],[-90,90],[20,140]]
-            '''curr_ang = []
-            for i in range(6):
-                a = Arm.Arm_serial_servo_read(i+1) - delta_servo[i]
-                curr_ang.append(a)'''
+            try:
+                curr_ang = read_feedback()
+            except (rospy.ROSException, ValueError) as exc:
+                print("\n无法点动，当前角度读取失败: %s" % exc)
+                continue
             
             idx = int(command[1])-1
             
             step = 8 if command[0]=='g' else -8
 
-            # ✅ 只在这里修正 2 号舵机反向
-            if idx == 1:
-                step = -step
+            # Joint signs are applied once, by arm_control_node.
                 
             
 
@@ -313,13 +322,7 @@ def main():
                 print("已到达限位")
                 continue
 
-            # ✅ 真实写入舵机（编号完全正确）
-            target = new_ang + delta_servo[idx]
-            Arm.Arm_serial_servo_write(idx+1, target, 300)
-            
-            print(f"本次写入舵机{idx+1},加上漂移的目标值：{target}")#增加打印看信息
-
-            # ✅ 完全保留你原来的 ROS 发布逻辑，一点不改
+            # Publish once; never write the same hardware from this process.
             curr_ang[idx] = new_ang
             arm_servo_degree.position = radians_list(curr_ang)
             arm_servo_degree.header.stamp = rospy.Time.now()
