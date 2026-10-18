@@ -172,32 +172,45 @@ class RosArmBackend:
     def hold(self,timeout):
         from control_msgs.msg import FollowJointTrajectoryGoal
         from trajectory_msgs.msg import JointTrajectoryPoint
+        def finish(ok,diagnostic):
+            self.stop_diagnostic=diagnostic
+            return ok
         end=time.monotonic()+timeout
         if self.sent:
             state=self.client.get_state()
+            result=self.client.get_result()
+            if result and 'STOP_FAILED' in result.error_string:return finish(False,result.error_string)
             if state in (0,1,6,7):
                 self.client.cancel_goal()
                 while time.monotonic()<end and self.client.get_state() in (0,1,6,7):
                     time.sleep(.02)
                 state=self.client.get_state();result=self.client.get_result()
                 if state==2 and result is not None and result.error_code==0:
-                    return True  # Driver promises PREEMPTED only after fresh measured hold.
+                    return finish(True,'measured cancellation hold confirmed')
                 if state in (0,1,6,7) or (result and 'STOP_FAILED' in result.error_string):
-                    return False
+                    return finish(False,result.error_string if result else 'cancellation stop deadline exceeded')
         try:
             # Even an idle client must obtain explicit measured hold confirmation.
             m=self.fresh_joints();values=dict(zip(m.name,m.position))
             goal=FollowJointTrajectoryGoal();goal.trajectory.joint_names=self.cfg['joint_names']
             p=JointTrajectoryPoint();p.positions=[values[n] for n in self.cfg['joint_names']]
             p.time_from_start=self.rospy.Duration(.25);goal.trajectory.points=[p]
+            # Four distinct scans are required (reference + three stable changes).
+            # The SDK takes ~0.645s/scan; the driver's implicit 1s extra is too short.
+            goal.goal_time_tolerance=self.rospy.Duration(self.cfg['arrival_timeout'])
             # Terminal state can arrive just before the driver's worker releases its busy flag.
             time.sleep(.05)
+            if time.monotonic()+.25+self.cfg['arrival_timeout']>=end:
+                return finish(False,'insufficient remaining hold confirmation budget')
             self.client.send_goal(goal);self.sent=True
             while time.monotonic()<end:
                 if self.client.get_state() not in (0,1,6,7):
                     result=self.client.get_result()
-                    return self.client.get_state()==3 and result is not None and result.error_code==0
+                    ok=self.client.get_state()==3 and result is not None and result.error_code==0
+                    return finish(ok,'measured hold confirmed' if ok else
+                                  ('hold state='+str(self.client.get_state())+'; '+
+                                   (result.error_string if result else 'missing result')))
                 time.sleep(.02)
-        except Exception:
-            return False
-        return False
+        except Exception as exc:
+            return finish(False,str(exc))
+        return finish(False,'hold result deadline exceeded')

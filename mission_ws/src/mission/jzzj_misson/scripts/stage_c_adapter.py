@@ -67,7 +67,7 @@ class StageCAdapter:
             return
         if cancel_at is not None:
             stop_wait=max(rospy.get_param('~stage_c_cancel_timeout',6.),
-                          rospy.get_param('/stage_c_server/execution/stop_timeout',8.)+1.)
+                          rospy.get_param('/stage_c_server/execution/stop_timeout',12.)+1.)
             if active and time.monotonic()-cancel_at>stop_wait:
                 node._fault('stage C cancel timeout; physical stop not confirmed')
             return

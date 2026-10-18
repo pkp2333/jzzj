@@ -38,6 +38,7 @@ rospy=types.ModuleType('rospy');rospy.Duration=Duration
 rospy.Time=types.SimpleNamespace(now=lambda:Duration(100.))
 rospy.logerr=lambda *args:None;rospy.logwarn=lambda *args:None
 rospy.get_param=lambda name,default=None:default
+rospy.set_param=lambda *args:None
 rospy.get_time=lambda:100.
 actionlib=types.ModuleType('actionlib')
 messages=types.ModuleType('jzzj_grasp_interfaces.msg')
@@ -61,6 +62,7 @@ class ServerTests(unittest.TestCase):
     def setUp(self):
         self.s=server.Server.__new__(server.Server);self.s.lock=threading.RLock();self.s.active=None
         self.s.poisoned=False;self.s.used_sessions=set();self.s.cfg=CFG;self.s.backend=DummyBackend()
+        self.s.holding_latched=False
         self.s.store=Store();self.s.store.context=Context(100.,'session',True,True,False,time.monotonic())
         self.s.selection=Publisher();self.s.engine=None
         self.goal=Message(session_id='session',target_color='red',grasp_profile='tabletop',timeout=Duration(30.))
@@ -88,6 +90,12 @@ class ServerTests(unittest.TestCase):
         self.s.run(h,self.s.engine,self.goal)
         self.assertTrue(self.s.poisoned);self.assertEqual(h.status,'aborted')
         self.assertFalse(self.s.selection.sent[-1].enabled)
+    def test_stop_and_holding_latches_are_exposed_to_readiness_check(self):
+        self.s.poisoned=True;self.s.holding_latched=True
+        values={}
+        with patch.object(server.rospy,'set_param',side_effect=lambda k,v:values.update({k:v})):
+            self.s.publish_latches()
+        self.assertEqual(values,{'~stop_failed_latched':True,'~holding_latched':True})
     def test_worker_success_fields(self):
         h=Handle(self.goal);self.accept(h)
         self.s.engine.execute=lambda *args:Outcome('SUCCESS','ok',True,True,True,True,True)
@@ -135,10 +143,10 @@ class TaskAdapterTests(unittest.TestCase):
     def test_old_result_not_accepted(self):
         self.a.completed(0,3,Message(code=0));self.assertIsNone(self.a.done)
     def test_cancel_timeout_does_not_grant_transport(self):
-        self.a.active=True;self.a.cancel_at=time.monotonic()-10
+        self.a.active=True;self.a.cancel_at=time.monotonic()-14
         self.a.tick(self.node);self.assertEqual(self.node.state,'FAULT');self.assertEqual(self.node.stage_index,0)
     def test_cancel_wait_covers_server_stop_budget(self):
-        self.a.active=True;self.a.cancel_at=time.monotonic()-7
+        self.a.active=True;self.a.cancel_at=time.monotonic()-11
         self.a.tick(self.node)
         self.assertIsNone(self.node.fault)
         self.assertEqual(self.node.stage_index,0)

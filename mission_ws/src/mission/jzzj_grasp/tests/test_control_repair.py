@@ -93,7 +93,7 @@ class PreflightTests(unittest.TestCase):
                             arm+'feedback_timeout':1.5, arm+'stop_timeout':5.,
                             '/stage_c_server/backend':'real',
                             '/stage_c_kinematics/calibration_confirmed':True,
-                            '/stage_c_server/execution/stop_timeout':8.,
+                            '/stage_c_server/execution/stop_timeout':12.,
                             '/stage_c_server/execution/arrival_timeout':4.})
         for key in ('real_motion_enabled','robot_calibration_confirmed','workspace_clear_confirmed','model_validated'):
             self.params['/stage_c_server/execution/'+key] = True
@@ -113,6 +113,11 @@ class PreflightTests(unittest.TestCase):
 
     def test_manager_cannot_time_out_before_driver_stop(self):
         self.params['/stage_c_server/execution/stop_timeout'] = 4.
+        with self.assertRaisesRegex(ValueError, 'stop_timeout'):
+            preflight.validate_launch_parameters(self.params)
+
+    def test_old_eight_second_budget_cannot_cover_hold_failure_path(self):
+        self.params['/stage_c_server/execution/stop_timeout'] = 8.
         with self.assertRaisesRegex(ValueError, 'stop_timeout'):
             preflight.validate_launch_parameters(self.params)
 

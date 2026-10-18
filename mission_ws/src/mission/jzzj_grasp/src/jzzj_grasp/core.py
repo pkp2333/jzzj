@@ -320,12 +320,18 @@ class Engine:
                 stopped=self.backend.hold(self.cfg['stop_timeout'])
             except Exception:
                 stopped=False
-            return Outcome(exc.code if stopped else 'STOP_FAILED',str(exc),False,
+            message=str(exc)
+            if not stopped and getattr(self.backend,'stop_diagnostic',''):
+                message+='; stop: '+self.backend.stop_diagnostic
+            return Outcome(exc.code if stopped else 'STOP_FAILED',message,False,
                            False,False,False,stopped)
         except Exception as exc:
             try:
                 stopped=self.backend.hold(self.cfg['stop_timeout'])
             except Exception:
                 stopped=False
-            return Outcome('MOTION_FAILED' if stopped else 'STOP_FAILED',str(exc),
+            message=str(exc)
+            if not stopped and getattr(self.backend,'stop_diagnostic',''):
+                message+='; stop: '+self.backend.stop_diagnostic
+            return Outcome('MOTION_FAILED' if stopped else 'STOP_FAILED',message,
                            stop_confirmed=stopped)

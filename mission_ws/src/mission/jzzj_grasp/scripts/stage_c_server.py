@@ -16,6 +16,7 @@ class Server:
         validate_config(self.cfg)
         self.store=Store();self.lock=threading.RLock();self.active=None;self.engine=None;self.worker=None
         self.poisoned=False;self.used_sessions=set();self.holding_latched=False
+        self.publish_latches()
         self.backend=SimBackend(self.store,self.cfg,lambda:rospy.Time.now().to_sec()) if self.kind=='sim' else RosArmBackend(self.cfg)
         self.selection=rospy.Publisher('/stage_c/selection',TargetSelection,queue_size=1,latch=True)
         self.mode=rospy.Publisher('/stage_c/backend',__import__('std_msgs.msg',fromlist=['String']).String,queue_size=1,latch=True)
@@ -29,6 +30,13 @@ class Server:
     def context_cb(self,m):
         with self.store.lock:
             self.store.context=Context(m.header.stamp.to_sec(),m.session_id,m.base_locked,m.arm_control_granted,m.stop_requested,time.monotonic())
+
+    def publish_latches(self):
+        try:
+            rospy.set_param('~stop_failed_latched',self.poisoned)
+            rospy.set_param('~holding_latched',self.holding_latched)
+        except Exception as exc:
+            rospy.logwarn('cannot publish stage C latch diagnostics: %s',exc)
 
     def observation_cb(self,m):
         # Atomic frame replacement: an empty detection removes old targets.
@@ -76,6 +84,7 @@ class Server:
             with self.lock:
                 if o.code=='STOP_FAILED':self.poisoned=True
                 if o.holding_object or e.closed:self.holding_latched=True
+            self.publish_latches()
             # Do not acquire ActionServer's lock while holding our callback lock.
             self.selection.publish(TargetSelection(session_id=g.session_id,target_color=g.target_color,enabled=False))
             if o.code=='SUCCESS':gh.set_succeeded(self.result(o))
@@ -85,6 +94,7 @@ class Server:
         except Exception as exc:
             rospy.logerr('stage C worker failed: %s',exc)
             with self.lock:self.poisoned=True
+            self.publish_latches()
             gh.set_aborted(VisualGraspResult(code=CODES['STOP_FAILED'],message=str(exc)))
             with self.lock:self.active=self.engine=None
 

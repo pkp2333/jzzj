@@ -35,12 +35,12 @@ def validate_launch_parameters(params):
         value = config(path)
         if not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
             raise ValueError('invalid ' + arm + path)
-    stop = params.get('/stage_c_server/execution/stop_timeout', 0)
-    if not math.isfinite(stop) or stop < config('stop_timeout') + config('feedback_timeout'):
-        raise ValueError('C stop_timeout must cover driver stop_timeout plus feedback_timeout')
     arrival = params.get('/stage_c_server/execution/arrival_timeout', 0)
     if not math.isfinite(arrival) or not 1 <= arrival <= 5:
         raise ValueError('arrival_timeout must be 1..5 seconds')
+    stop = params.get('/stage_c_server/execution/stop_timeout', 0)
+    if not math.isfinite(stop) or stop < .25 + arrival + config('stop_timeout') + config('feedback_timeout'):
+        raise ValueError('C stop_timeout must cover hold duration, arrival_timeout, driver stop_timeout and feedback_timeout')
 
 
 def context_ready(message, session, now, max_age):
@@ -74,6 +74,9 @@ def runtime_check(session):
     rospy.init_node('stage_c_control_check', anonymous=True, disable_signals=True)
     if rospy.get_param('/stage_c_server/backend', '') != 'real':
         raise RuntimeError('real stage C server unavailable')
+    if (rospy.get_param('/stage_c_server/stop_failed_latched',True) is not False or
+            rospy.get_param('/stage_c_server/holding_latched',True) is not False):
+        raise RuntimeError('stage C stop/holding latch active or unknown; operator recovery required')
     pubs, _, services = rosgraph.Master(rospy.get_name()).getSystemState()
     topics = {name: owners for name, owners in pubs}
     owners = topics.get('/arm_left/joint_states', [])
