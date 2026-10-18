@@ -1,0 +1,11 @@
+cmake_minimum_required(VERSION 3.10)
+project(stage_c_kinematics_regression CXX)
+find_package(PkgConfig REQUIRED)
+pkg_check_modules(KDL REQUIRED IMPORTED_TARGET orocos-kdl)
+pkg_check_modules(TINYXML2 REQUIRED IMPORTED_TARGET tinyxml2)
+add_executable(kinematics_regression test_seeded_ik.cpp)
+target_compile_features(kinematics_regression PRIVATE cxx_std_11)
+target_link_libraries(kinematics_regression PRIVATE PkgConfig::KDL PkgConfig::TINYXML2)
+enable_testing()
+add_test(NAME seeded_ik COMMAND kinematics_regression
+  "${CMAKE_CURRENT_SOURCE_DIR}/../../../../../../catkin_ws/src/actuator/arm/urdf/arm.urdf")

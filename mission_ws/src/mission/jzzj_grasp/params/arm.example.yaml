@@ -9,5 +9,6 @@ joint_upper_rad: []
 sdk_lower_deg: []
 sdk_upper_deg: []
 position_tolerance_rad: 0.035
-feedback_timeout: 0.6
-stop_timeout: 3.0
+feedback_timeout: 1.5
+feedback_period: 0.1
+stop_timeout: 5.0

@@ -51,6 +51,7 @@ bash /home/orangepi/jzzj/tools/stage_c/start_observe.sh yellow
 
 退出观察入口及旧的 arm_test/arm_control 测试；保留独立 roscore 和已启动的相机。
 控制入口会检查重复节点，不会强杀已有任务。
+控制启动前会展开 launch 参数，检查轨迹节点的私有命名空间、真实执行开关和停止预算。单次测试会检查实际接口、新鲜反馈及当前会话心跳。闭环调用修复及本地验证见 [修复记录](STAGE_C_ARM_CONTROL_REPAIR_20261018.md)。
 
 ```bash
 bash /home/orangepi/jzzj/tools/stage_c/start_control.sh real

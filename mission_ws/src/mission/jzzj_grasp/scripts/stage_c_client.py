@@ -12,11 +12,12 @@ if __name__=='__main__':
         timeout=rospy.Duration(rospy.get_param('~timeout',60.)))
     rospy.on_shutdown(client.cancel_goal)
     client.send_goal(goal,feedback_cb=lambda f:rospy.loginfo_throttle(1.,'stage C: %s',f.step))
-    deadline=time.monotonic()+goal.timeout.to_sec()+5.
+    stop_wait=max(5.,float(rospy.get_param('/stage_c_server/execution/stop_timeout',8.))+1.)
+    deadline=time.monotonic()+goal.timeout.to_sec()+stop_wait
     while client.get_state() in (0,1,6,7) and time.monotonic()<deadline and not rospy.is_shutdown():
         time.sleep(.02)
     if client.get_state() in (0,1,6,7):
-        client.cancel_goal();end=time.monotonic()+5.
+        client.cancel_goal();end=time.monotonic()+stop_wait
         while client.get_state() in (0,1,6,7) and time.monotonic()<end:time.sleep(.02)
     result=client.get_result()
     if result is None:raise RuntimeError('no final result / stop not confirmed')

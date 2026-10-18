@@ -24,10 +24,11 @@ class TrajectoryDriver:
         self.raw_lower=rospy.get_param('~sdk_lower_deg');self.raw_upper=rospy.get_param('~sdk_upper_deg')
         validate_mapping(self.signs,self.offsets,self.raw_lower,self.raw_upper)
         self.tolerance=rospy.get_param('~position_tolerance_rad',.035)
-        self.freshness=rospy.get_param('~feedback_timeout',.6)
+        self.freshness=rospy.get_param('~feedback_timeout',1.5)
+        self.read_period=rospy.get_param('~feedback_period',.1)
         self.stop_timeout=rospy.get_param('~stop_timeout',3.)
         self.settle_delta=rospy.get_param('~settle_delta_rad',.01)
-        if not all(math.isfinite(v) and v>0 for v in (self.tolerance,self.freshness,self.stop_timeout,self.settle_delta)):
+        if not all(math.isfinite(v) and v>0 for v in (self.tolerance,self.freshness,self.stop_timeout,self.settle_delta,self.read_period)):
             raise ValueError('positive finite tolerances/timeouts required')
         # Refuse startup if any old hardware-state writer is already running.
         import rosgraph
@@ -36,31 +37,47 @@ class TrajectoryDriver:
             raise ValueError('another left-arm state publisher exists; stop legacy driver first')
         self.io=threading.RLock();self.lock=threading.RLock();self.current=None;self.received=0.;self.sequence=0
         self.active=None;self.cancel=threading.Event();self.poisoned=False;self.worker=None
-        from Arm_Lib import Arm_Device
+        from checked_arm_sdk import CheckedArmDevice
         from hardware_lease import HardwareLease
         self.lease=HardwareLease('left')
-        self.device=Arm_Device(lr='left')
+        self.device=CheckedArmDevice(lr='left')
+        self.read_duration=0.
         self.pub=rospy.Publisher('/arm_left/joint_states',JointState,queue_size=1)
         self.read()
         if self.current is None:raise RuntimeError('cannot read all six servos before enabling torque')
+        rospy.on_shutdown(self.shutdown)
         self.write(self.current,.25)
         with self.io:self.device.Arm_serial_set_torque(1)
-        self.timer=rospy.Timer(rospy.Duration(.1),lambda _:self.read())
+        # Torque setup may block in the vendor SDK; obtain a new complete frame
+        # before accepting trajectories instead of reusing the pre-enable sample.
+        if not self.read():raise RuntimeError('cannot refresh feedback after torque setup')
+        self.sample()
+        self.timer=rospy.Timer(rospy.Duration(self.read_period),lambda _:self.read())
         self.server=actionlib.ActionServer('/arm_left/follow_joint_trajectory',FollowJointTrajectoryAction,
             self.goal,self.cancel_goal,auto_start=False)
-        self.server.start();rospy.on_shutdown(self.shutdown)
+        self.server.start()
 
     def read(self):
         try:
             with self.io:
+                started=time.monotonic();stamp=rospy.Time.now()
                 raw=[self.device.Arm_serial_servo_read(i+1) for i in range(6)]
             if any(v is None or not math.isfinite(v) or not lo<=v<=hi for v,lo,hi in zip(raw,self.raw_lower,self.raw_upper)):
                 raise ValueError('invalid SDK feedback')
             q=decode(raw,self.signs,self.offsets)
             validate_target(self.names,q,self.names,self.lower,self.upper)
-            with self.lock:self.current=q;self.received=time.monotonic();self.sequence+=1
-            m=JointState();m.header.stamp=rospy.Time.now();m.name=self.names;m.position=q;self.pub.publish(m)
-        except Exception as exc:rospy.logerr_throttle(1.,'arm feedback rejected: %s',exc)
+            elapsed=time.monotonic()-started
+            with self.lock:
+                self.current=q;self.received=started;self.sequence+=1;self.read_duration=elapsed
+            # Sequential servo reads are not an instantaneous sample. Timestamp
+            # their beginning so stale first-joint data cannot look newly acquired.
+            m=JointState();m.header.stamp=stamp;m.name=self.names;m.position=q;self.pub.publish(m)
+            if elapsed>self.read_period:
+                rospy.logwarn_throttle(5.,'six-servo read %.3fs exceeds requested period %.3fs',elapsed,self.read_period)
+            return True
+        except Exception as exc:
+            rospy.logerr_throttle(1.,'arm feedback rejected: %s',exc)
+            return False
 
     def sample(self):
         with self.lock:

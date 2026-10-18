@@ -12,4 +12,5 @@
 <depend>roscpp</depend><depend>kdl_parser</depend><depend>urdf</depend><exec_depend>arm</exec_depend><exec_depend>jzzj_visual_servo</exec_depend><depend>orocos_kdl</depend><test_depend>python3-numpy</test_depend>
 <exec_depend>roslib</exec_depend><exec_depend>diagnostic_msgs</exec_depend><exec_depend>user_msgs</exec_depend>
 <exec_depend>cv_bridge</exec_depend><exec_depend>yolov5_rknn</exec_depend><exec_depend>python3-numpy</exec_depend><exec_depend>python3-opencv</exec_depend>
+<test_depend>tinyxml2</test_depend>
 </package>

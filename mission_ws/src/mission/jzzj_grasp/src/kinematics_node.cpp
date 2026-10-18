@@ -1,7 +1,7 @@
-// Only built explicitly on the target with the vendor ARM64 kinematics library.
+// ROS adapter; the seeded, bounded solver has no vendor-library dependency.
 #include <ros/ros.h>
 #include <jzzj_grasp_interfaces/ComputeArmMotion.h>
-#include <arm/arm_kinematics.h>
+#include "kinematics_solver.h"
 #include <kdl_parser/kdl_parser.hpp>
 #include <urdf/model.h>
 #include <algorithm>
@@ -11,18 +11,13 @@
 class Adapter {
   ros::NodeHandle nh_, pnh_{"~"};
   ros::ServiceServer service_;
-  MyArm arm_;
   KDL::Chain chain_;
-  std::unique_ptr<KDL::ChainFkSolverPos_recursive> fk_;
+  std::unique_ptr<stage_c::SeededIk> solver_;
   std::string urdf_, frame_;
   std::vector<double> low_, high_, tcp_, grip_limits_;
-  double residual_, rotation_residual_, max_delta_;
+  stage_c::IkPolicy policy_;
   KDL::Frame forward(const std::vector<double>& q) {
-    KDL::JntArray joints(5);
-    for(unsigned i=0;i<5;i++) joints(i)=q.at(i);
-    KDL::Frame f;
-    if(fk_->JntToCart(joints,f)<0) throw std::runtime_error("FK failed");
-    return f*KDL::Frame(KDL::Vector(tcp_[0],tcp_[1],tcp_[2]));
+    return solver_->forward(std::vector<double>(q.begin(), q.begin()+5));
   }
   bool handle(jzzj_grasp_interfaces::ComputeArmMotion::Request& req,
               jzzj_grasp_interfaces::ComputeArmMotion::Response& res) {
@@ -38,26 +33,19 @@ class Adapter {
         seed[i]=req.seed.position.at(std::distance(req.seed.name.begin(),it));
         if(!std::isfinite(seed[i])) throw std::runtime_error("invalid seed");
       }
+      // Reject invalid measured state before solving or projecting any candidate.
+      forward(seed);
+      if(seed[5]<grip_limits_[0]||seed[5]>grip_limits_[1]) throw std::runtime_error("gripper limits");
       std::vector<double> solution=seed;
       if(!req.forward_only) {
         auto p=req.tcp_target.pose.position;auto q=req.tcp_target.pose.orientation;
         const double norm=std::sqrt(q.x*q.x+q.y*q.y+q.z*q.z+q.w*q.w);
         if(!std::isfinite(norm)||std::abs(norm-1.)>1e-3 || !std::isfinite(p.x)||!std::isfinite(p.y)||!std::isfinite(p.z))
           throw std::runtime_error("invalid TCP pose");
-        KDL::Rotation rotation=KDL::Rotation::Quaternion(q.x,q.y,q.z,q.w);
+        KDL::Rotation rotation=KDL::Rotation::Quaternion(q.x/norm,q.y/norm,q.z/norm,q.w/norm);
         KDL::Frame desired(rotation,KDL::Vector(p.x,p.y,p.z));
-        KDL::Frame wrist=desired*KDL::Frame(KDL::Vector(tcp_[0],tcp_[1],tcp_[2])).Inverse();
-        double roll,pitch,yaw;rotation.GetRPY(roll,pitch,yaw);
-        std::vector<double> xyz{wrist.p.x(),wrist.p.y(),wrist.p.z()},rpy{roll,pitch,yaw},out;
-        if(!arm_.arm_getIK(urdf_,xyz,rpy,out)||out.size()<5) throw std::runtime_error("IK failed");
-        for(unsigned i=0;i<5;i++) {
-          if(!std::isfinite(out[i])||out[i]<low_[i]||out[i]>high_[i]||std::abs(out[i]-seed[i])>max_delta_)
-            throw std::runtime_error("IK limits/continuity violation");
-          solution[i]=out[i];
-        }
-        auto f=forward(solution);
-        if((f.p-desired.p).Norm()>residual_ || KDL::diff(f.M,desired.M).Norm()>rotation_residual_)
-          throw std::runtime_error("IK FK pose residual too large");
+        const auto out=solver_->solve(desired,std::vector<double>(seed.begin(),seed.begin()+5));
+        std::copy(out.begin(),out.end(),solution.begin());
       }
       for(unsigned i=0;i<5;i++) if(solution[i]<low_[i]||solution[i]>high_[i]) throw std::runtime_error("seed/solution limits");
       if(solution[5]<grip_limits_[0]||solution[5]>grip_limits_[1]) throw std::runtime_error("gripper limits");
@@ -79,12 +67,12 @@ public:
        !pnh_.getParam("gripper_limits_rad",grip_limits_) || grip_limits_.size()!=2)
       throw std::runtime_error("explicit URDF/TCP/gripper limits required");
     pnh_.param<std::string>("arm_frame",frame_,"arm_left/arm_base_link");
-    pnh_.param("max_position_residual_m",residual_,.003);
-    pnh_.param("max_orientation_residual_rad",rotation_residual_,.08);
-    pnh_.param("max_joint_step_rad",max_delta_,.35);
+    pnh_.param("max_position_residual_m",policy_.position_residual,.003);
+    pnh_.param("max_orientation_residual_rad",policy_.rotation_residual,.08);
+    pnh_.param("max_joint_step_rad",policy_.max_joint_step,.35);
+    pnh_.param("joint_limit_epsilon_rad",policy_.limit_epsilon,.001);
     for(double value:tcp_) if(!std::isfinite(value)) throw std::runtime_error("nonfinite TCP offset");
-    if(!std::isfinite(residual_)||residual_<=0 || !std::isfinite(rotation_residual_)||rotation_residual_<=0 ||
-       !std::isfinite(max_delta_)||max_delta_<=0 || !std::isfinite(grip_limits_[0])||!std::isfinite(grip_limits_[1])||grip_limits_[0]>=grip_limits_[1])
+    if(!std::isfinite(grip_limits_[0])||!std::isfinite(grip_limits_[1])||grip_limits_[0]>=grip_limits_[1])
       throw std::runtime_error("invalid calibration limits/tolerances");
     urdf::Model model;KDL::Tree tree;
     if(!model.initFile(urdf_)||!kdl_parser::treeFromUrdfModel(model,tree)||!tree.getChain("arm_base_link","link5",chain_)||chain_.getNrOfJoints()!=5)
@@ -94,7 +82,7 @@ public:
       if(!joint||!joint->limits) throw std::runtime_error("missing URDF limits");
       low_.push_back(joint->limits->lower);high_.push_back(joint->limits->upper);
     }
-    fk_.reset(new KDL::ChainFkSolverPos_recursive(chain_));
+    solver_.reset(new stage_c::SeededIk(chain_,low_,high_,KDL::Vector(tcp_[0],tcp_[1],tcp_[2]),policy_));
     service_=nh_.advertiseService("/stage_c/compute_arm_motion",&Adapter::handle,this);
   }
 };

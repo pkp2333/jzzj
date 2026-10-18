@@ -6,9 +6,9 @@
     "search_timeout": 3.0,
     "max_goal_seconds": 120.0,
     "ik_timeout": 1.0,
-    "stop_timeout": 4.0,
+    "stop_timeout": 8.0,
     "motion_seconds": 0.8,
-    "arrival_timeout": 2.0,
+    "arrival_timeout": 4.0,
     "arm_frame": "arm_left/arm_base_link",
     "joint_names": [
       "joint1",

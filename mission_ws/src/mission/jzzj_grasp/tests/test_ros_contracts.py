@@ -137,6 +137,11 @@ class TaskAdapterTests(unittest.TestCase):
     def test_cancel_timeout_does_not_grant_transport(self):
         self.a.active=True;self.a.cancel_at=time.monotonic()-10
         self.a.tick(self.node);self.assertEqual(self.node.state,'FAULT');self.assertEqual(self.node.stage_index,0)
+    def test_cancel_wait_covers_server_stop_budget(self):
+        self.a.active=True;self.a.cancel_at=time.monotonic()-7
+        self.a.tick(self.node)
+        self.assertIsNone(self.node.fault)
+        self.assertEqual(self.node.stage_index,0)
     def test_feedback_updates_display_only(self):
         self.a.active=True;self.a.latest='DESCEND';self.a.tick(self.node)
         self.assertEqual(self.node.stage_index,3);self.assertEqual(self.node.commands,0)
@@ -194,5 +199,27 @@ class DriverContractTests(unittest.TestCase):
             value[0]+=1;return ([.02 if value[0]%2 else -.02]*6,value[0])
         self.d.sample=sample
         self.assertFalse(self.d.converged([0]*6,time.monotonic()+.08,[.035]*6,False))
+    def test_feedback_timestamp_covers_oldest_sequential_read(self):
+        self.d.io=threading.RLock();self.d.signs=[1]*6;self.d.offsets=[0]*6
+        self.d.raw_lower=[-100]*6;self.d.raw_upper=[100]*6;self.d.sequence=0
+        self.d.read_period=.1;self.d.pub=Publisher()
+        self.d.device=Message(Arm_serial_servo_read=lambda _:0.)
+        with patch.object(self.module,'JointState',lambda:Message(header=Message())), \
+             patch.object(self.module.time,'monotonic',side_effect=[10.,10.64]), \
+             patch.object(self.module.rospy,'logwarn_throttle',lambda *a:None,create=True):
+            self.assertTrue(self.d.read())
+        self.assertEqual(self.d.received,10.)
+        self.assertAlmostEqual(self.d.read_duration,.64)
+        self.assertEqual(self.d.sequence,1)
+        self.assertEqual(self.d.pub.sent[0].header.stamp.to_sec(),100.)
+    def test_failed_feedback_does_not_refresh_old_state(self):
+        self.d.io=threading.RLock();self.d.raw_lower=[-100]*6;self.d.raw_upper=[100]*6
+        self.d.sequence=7;self.d.received=1.;self.d.current=[.1]*6
+        self.d.device=Message(Arm_serial_servo_read=lambda _:None)
+        with patch.object(self.module.rospy,'logerr_throttle',lambda *a:None,create=True):
+            self.assertFalse(self.d.read())
+        self.assertEqual(self.d.sequence,7)
+        self.assertEqual(self.d.received,1.)
+        self.assertEqual(self.d.current,[.1]*6)
 
 if __name__=='__main__':unittest.main()

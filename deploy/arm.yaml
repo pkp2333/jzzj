@@ -9,4 +9,5 @@ sdk_lower_deg: [-135, -90, -90, -90, -135, 0]
 sdk_upper_deg: [135, 90, 90, 90, 135, 100]
 position_tolerance_rad: 0.035
 feedback_timeout: 1.5
+feedback_period: 0.1
 stop_timeout: 5.0
