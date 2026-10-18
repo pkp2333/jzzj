@@ -1,18 +1,19 @@
 <?xml version="1.0"?>
 <launch>
-    <!-- stage C 视觉闭环·观察模式：YOLO检测 + 合并器 + observer（输出[ARM_TARGET]目标坐标）
+    <!-- stage C 视觉闭环·观察模式：YOLO检测 + observer（输出[ARM_TARGET]目标坐标）
          不启动机械臂和底盘，纯视觉验证。相机需已单独启动（ascamera hp60c.launch）。
          target_color 可选 red/green/blue/yellow -->
+    <arg name="use_split_detections" default="false"/>
     <arg name="target_color" default="green"/>
-    <arg name="config" default="/home/orangepi/jzzj-stagec/deploy/stage_c.yaml"/>
-    <arg name="detector_config" default="/home/orangepi/jzzj-stagec/deploy/detector.yaml"/>
+    <arg name="config" default="$(find jzzj_grasp)/params/stage_c.yaml"/>
+    <arg name="detector_config" default="$(find jzzj_grasp)/params/detector_fruit6.yaml"/>
 
-    <!-- YOLO（复用已运行相机的图像流；yaml顶层键已是yolov5_rknn_rc，不能再加ns） -->
-    <rosparam command="load" file="$(arg detector_config)"/>
+    <!-- YOLO：扁平参数文件加载到检测器命名空间。 -->
+    <rosparam command="load" file="$(arg detector_config)" ns="yolov5_rknn_rc"/>
     <node pkg="yolov5_rknn" type="yolov5_rknn_stream" name="yolov5_rknn_stream" ns="yolov5_rknn_rc" output="screen"/>
 
     <!-- 合并YOLO左右分区检测为单一话题（仅部署版YOLO需要） -->
-    <node pkg="jzzj_visual_servo" type="detections_merger.py" name="detections_merger" output="screen"/>
+    <node if="$(arg use_split_detections)" pkg="jzzj_visual_servo" type="detections_merger.py" name="detections_merger" output="screen"/>
 
     <!-- 视觉观察节点：RGB-D + YLOE → 臂坐标系目标 -->
     <node pkg="jzzj_visual_servo" type="stage_c_observer.py" name="stage_c_observer" output="screen">

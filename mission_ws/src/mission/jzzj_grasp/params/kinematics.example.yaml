@@ -1,5 +1,5 @@
 calibration_confirmed: false
-urdf: /home/orangepi/catkin_ws/src/actuator/arm/urdf/arm.urdf
+urdf: /home/orangepi/jzzj/catkin_ws/src/actuator/arm/urdf/arm.urdf
 arm_frame: arm_left/arm_base_link
 # From URDF link5 to the real gripping TCP, metres. Do not blindly copy claw_link.
 tcp_offset_m: []

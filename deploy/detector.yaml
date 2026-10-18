@@ -1,0 +1,48 @@
+{
+  "image_topic_name": "/ascamera_hp60c/rgb0/image",
+  "model_url": "/home/orangepi/Documents/yolov5_weights/yolov5s.rknn",
+  "labels_url": "/home/orangepi/Documents/yolov5_weights/labels_rc.txt",
+  "class_num": 6,
+  "species_map": [
+    0,
+    1,
+    1,
+    0,
+    1,
+    0
+  ],
+  "species_labels": [
+    "cherry",
+    "lemon"
+  ],
+  "anchors": [
+    10,
+    13,
+    16,
+    30,
+    33,
+    23,
+    30,
+    61,
+    62,
+    45,
+    59,
+    119,
+    116,
+    90,
+    156,
+    198,
+    373,
+    326
+  ],
+  "conf_thresh": 0.3,
+  "iou_thresh": 0.5,
+  "kill_switch_topic": "/task",
+  "byte_track": {
+    "target_class_id": 0,
+    "track_thresh": 0.4,
+    "high_thresh": 0.5,
+    "match_thresh": 0.7,
+    "track_buffer": 60
+  }
+}

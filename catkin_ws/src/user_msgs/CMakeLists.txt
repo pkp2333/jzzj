@@ -55,6 +55,8 @@ find_package(catkin REQUIRED COMPONENTS
 add_message_files(
   FILES
   CannonStatus.msg
+  GrabCmd.msg
+  GrabFlag.msg
   CarCmd.msg
   ExitCondition.msg
   GimbalPoseDeg.msg

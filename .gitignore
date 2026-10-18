@@ -10,3 +10,9 @@ __pycache__/
 
 # Claude Code local settings
 .claude/
+
+# Recoverable migration archives and local logs
+/.local/
+
+# catkin workspace marker
+.catkin_workspace

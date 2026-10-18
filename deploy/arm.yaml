@@ -1,0 +1,12 @@
+hardware_enabled: true
+calibration_confirmed: true
+workspace_clear_confirmed: true
+servo_signs: [1, -1, 1, 1, 1, 1]
+servo_offsets_deg: [0, 0, 0, 0, 0, 0]
+joint_lower_rad: [-2.3562, -1.5708, -1.5708, -1.5708, -2.3562, 0.0]
+joint_upper_rad: [2.3562, 1.5708, 1.5708, 1.5708, 2.3562, 1.7453]
+sdk_lower_deg: [-135, -90, -90, -90, -135, 0]
+sdk_upper_deg: [135, 90, 90, 90, 135, 100]
+position_tolerance_rad: 0.035
+feedback_timeout: 1.5
+stop_timeout: 5.0
