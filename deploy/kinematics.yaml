@@ -2,7 +2,8 @@ calibration_confirmed: true
 urdf: /home/orangepi/jzzj/catkin_ws/src/actuator/arm/urdf/arm.urdf
 arm_frame: arm_left/arm_base_link
 tcp_offset_m: [0.053, 0.079, -0.051]
-gripper_limits_rad: [0.0, 1.7453]
+# Same raw 96..4000 limits as joint6 in arm.urdf and the trajectory driver.
+gripper_limits_rad: [-1.2851969946503699, 4.289701968810791]
 max_position_residual_m: 0.003
 max_orientation_residual_rad: 0.08
 max_joint_step_rad: 0.35

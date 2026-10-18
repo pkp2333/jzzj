@@ -74,6 +74,14 @@ int main(int argc,char** argv) {
     const auto desired=ik.forward(seed);
     require((desired.p-KDL::Vector(-.08050706320083502,-.13733959295096645,.03188118670604627)).Norm()<1e-9,"FK differs from measured ARM64 baseline");
     unsigned cases=1;
+    // The field joint4 feedback is above the old 90-degree model bound,
+    // but within the requested raw 96..4000 range. A known joint5 is required.
+    std::vector<double> expanded_pose={-78*deg,7.85*deg,84*deg,106.04*deg,0};
+    const auto expanded_tcp=ik.forward(expanded_pose);
+    auto expanded_solution=ik.solve(expanded_tcp,expanded_pose);
+    for(unsigned i=0;i<5;++i)
+      require(std::abs(expanded_solution[i]-expanded_pose[i])<1e-6,"expanded-range same-pose solve changed joint");
+    ++cases;
     auto result=ik.solve(desired,seed);
     for(unsigned i=0;i<5;++i)require(std::abs(result[i]-seed[i])<1e-6,"same-pose solution changed measured joint");
     ++cases;
@@ -83,15 +91,17 @@ int main(int argc,char** argv) {
     auto boundary_pose=ik.forward(boundary);
     result=ik.validateCandidate(boundary_pose,seed,boundary);
     require(std::abs(result[3]-seed[3])<=policy.max_joint_step,"boundary step exceeds hard continuity limit");++cases;
-    std::vector<double> vendor={88.9999984206*deg,-3.01921233689*deg,90.0193180979*deg,89.9792241678*deg,-1.00011011113*deg};
-    result=ik.validateCandidate(desired,seed,vendor);
+    auto boundary_seed=seed;boundary_seed[2]=robot.high[2];
+    const auto boundary_desired=ik.forward(boundary_seed);
+    auto vendor=boundary_seed;vendor[2]+=.0003;
+    result=ik.validateCandidate(boundary_desired,boundary_seed,vendor);
     require(result[2]==robot.high[2],"numeric overshoot did not project to hard upper limit");++cases;
     auto bad=vendor;bad[2]=robot.high[2]+.01;
-    rejects([&]{ik.validateCandidate(desired,seed,bad);},"joint3");++cases;
-    auto moved=desired;moved.p.x(moved.p.x()+.1);
-    rejects([&]{ik.validateCandidate(moved,seed,vendor);},"FK residual");++cases;
-    moved=desired;moved.M=KDL::Rotation::RotX(.3)*moved.M;
-    rejects([&]{ik.validateCandidate(moved,seed,vendor);},"FK residual");++cases;
+    rejects([&]{ik.validateCandidate(boundary_desired,boundary_seed,bad);},"joint3");++cases;
+    auto moved=boundary_desired;moved.p.x(moved.p.x()+.1);
+    rejects([&]{ik.validateCandidate(moved,boundary_seed,vendor);},"FK residual");++cases;
+    moved=boundary_desired;moved.M=KDL::Rotation::RotX(.3)*moved.M;
+    rejects([&]{ik.validateCandidate(moved,boundary_seed,vendor);},"FK residual");++cases;
     bad=seed;bad[0]+=.6;const auto distant=ik.forward(bad);
     rejects([&]{ik.validateCandidate(distant,seed,bad);},"continuity: joint1");++cases;
     auto unreachable=desired;unreachable.p=KDL::Vector(10,10,10);

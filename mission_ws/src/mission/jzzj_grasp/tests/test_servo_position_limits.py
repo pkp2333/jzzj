@@ -1,10 +1,13 @@
 """Protocol regressions: a recording fake bus, never real hardware."""
 import importlib.util
+import ast
 import math
 import os
 from pathlib import Path
 import sys
 import unittest
+import re
+import xml.etree.ElementTree as ET
 from unittest.mock import patch
 
 ROOT=Path(__file__).resolve().parents[5]
@@ -113,6 +116,19 @@ class ServoPositionTests(unittest.TestCase):
             for q in (low[i],high[i]):
                 degrees=math.degrees(q)*signs[i]+offsets[i]
                 self.assertIn(angle_to_position(i+1,degrees,True),(96,4000))
+    def test_all_urdf_and_gripper_limits_match_deployed_raw_position_mapping(self):
+        config=(ROOT/'deploy/arm.yaml').read_text(encoding='utf-8')
+        def setting(text,key):
+            return ast.literal_eval(re.search(r'^'+key+r':\s*(\[[^\n]+\])',text,re.M).group(1))
+        signs=setting(config,'servo_signs');offsets=setting(config,'servo_offsets_deg')
+        low,high=joint_limits(signs,offsets)
+        robot=ET.parse(ROOT/'catkin_ws/src/actuator/arm/urdf/arm.urdf')
+        for i in range(6):
+            limits=robot.find("./joint[@name='joint%d']/limit"%(i+1))
+            self.assertAlmostEqual(float(limits.get('lower')),low[i],places=12)
+            self.assertAlmostEqual(float(limits.get('upper')),high[i],places=12)
+        grip=setting((ROOT/'deploy/kinematics.yaml').read_text(encoding='utf-8'),'gripper_limits_rad')
+        self.assertEqual(grip,[low[5],high[5]])
     def test_bad_duration_or_partial_batch_sends_nothing(self):
         for duration in (0,-1,65536,800.,True):
             with self.assertRaises(ValueError):self.sdk.write_positions([2040]*6,duration)

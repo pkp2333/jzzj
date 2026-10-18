@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import subprocess
 import unittest
+import xml.etree.ElementTree as ET
 from test_stage_c import ROOT, Harness
 from jzzj_grasp.core import Failure
 from jzzj_grasp.planning import PathPlanner, Pose
@@ -18,8 +19,10 @@ class ActualKdlPlanningTests(unittest.TestCase):
             str(ROOT/'catkin_ws/src/actuator/arm/urdf/arm.urdf'),'--query'],
             stdin=subprocess.PIPE,stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True)
         self.cfg=copy.deepcopy(Harness().cfg);self.cfg['active_profile']='tabletop'
-        self.lower=[-2.3562,-1.5708,-1.5708,-1.5708,-2.3562,0.]
-        self.upper=[2.3562,1.5708,1.5708,1.5708,2.3562,1.7453]
+        robot=ET.parse(ROOT/'catkin_ws/src/actuator/arm/urdf/arm.urdf')
+        limits=[robot.find("./joint[@name='joint%d']/limit"%i) for i in range(1,7)]
+        self.lower=[float(l.get('lower')) for l in limits]
+        self.upper=[float(l.get('upper')) for l in limits]
     def tearDown(self):
         self.process.stdin.close();self.process.wait(timeout=5)
         self.process.stdout.close();self.process.stderr.close()
