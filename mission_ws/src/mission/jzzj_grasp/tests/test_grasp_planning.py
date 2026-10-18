@@ -88,7 +88,7 @@ class PlannerTests(unittest.TestCase):
         prefix,_=self.planner().plan(self.start,self.surface)
         self.assertEqual(prefix[0].step,'PREPARE_TRANSITION')
         self.p['transition_joint_waypoints_rad']=[[5.,0.,.21,.2,0.]]
-        with self.assertRaisesRegex(Failure,'out-of-limit'):
+        with self.assertRaisesRegex(Failure,r'out-of-limit.*j1=5\.000 not in'):
             self.planner().plan(self.start,self.surface)
     def test_out_of_workspace_transport_and_budget_block_route(self):
         self.p['transport_position']=[2.,0.,.2]

@@ -53,7 +53,10 @@ class PathPlanner:
     def valid_joints(self, q):
         if (not finite_vector(q, 6) or len(self.lower) != 6 or len(self.upper) != 6 or
                 any(not lo <= v <= hi for v, lo, hi in zip(q, self.lower, self.upper))):
-            raise Failure('NEEDS_REPOSITION', 'path contains invalid/out-of-limit joints')
+            bad = ['j{}={:.3f} not in [{:.3f},{:.3f}]'.format(i+1, v, lo, hi)
+                   for i, (v, lo, hi) in enumerate(zip(q, self.lower, self.upper)) if not lo <= v <= hi]
+            raise Failure('NEEDS_REPOSITION', 'path contains invalid/out-of-limit joints: ' +
+                          ('; '.join(bad) if bad else 'invalid joints/limits q={}'.format(q)))
 
     def valid_pose(self, pose, floor):
         if (not finite_vector(pose.position, 3) or
