@@ -61,6 +61,8 @@
     "profiles": {
       "tabletop": {
         "calibrated": false,
+        "transition_calibrated": false,
+        "transition_joint_waypoints_rad": [],
         "orientation_xyzw": [
           0.0,
           1.0,

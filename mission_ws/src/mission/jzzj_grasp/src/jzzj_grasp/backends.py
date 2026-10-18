@@ -1,4 +1,5 @@
 """Simulation and ROS adapters. Neither backend sends base commands."""
+import copy
 import math
 import time
 from .core import Failure, Observation, distance, finite_vector
@@ -16,6 +17,10 @@ class SimBackend:
         self.session,self.color=session,color
 
     def ready(self,guard):guard()
+
+    def preflight(self,surface,profile,guard,remaining=False):guard()
+
+    def prepare(self,surface,profile,guard,feedback):guard()
 
     def tcp(self,guard):guard();return self.position
 
@@ -92,10 +97,11 @@ class RosArmBackend:
         except self.rospy.ROSException:raise Failure('NOT_READY','kinematics service absent')
         self.fresh_joints();guard()
 
-    def solve(self,point,orientation,guard,forward=False):
+    def solve(self,point,orientation,guard,forward=False,seed=None):
         from jzzj_grasp_interfaces.srv import ComputeArmMotionRequest
         if self.ik_poisoned:raise Failure('MOTION_FAILED','IK worker unresponsive; restart required')
-        guard();req=ComputeArmMotionRequest();req.forward_only=forward;req.seed=self.fresh_joints()
+        guard();req=ComputeArmMotionRequest();req.forward_only=forward
+        req.seed=self.fresh_joints() if seed is None else seed
         req.tcp_target.header.frame_id=self.cfg['arm_frame'];req.tcp_target.header.stamp=self.rospy.Time.now()
         if point is not None:
             req.tcp_target.pose.position.x,req.tcp_target.pose.position.y,req.tcp_target.pose.position.z=point
@@ -128,6 +134,55 @@ class RosArmBackend:
         p=self.solve(None,None,guard,True).tcp_pose.pose.position
         return (p.x,p.y,p.z)
 
+    def measured(self):
+        m=self.fresh_joints();values=dict(zip(m.name,m.position))
+        return tuple(values[n] for n in self.cfg['joint_names'])
+
+    def planner(self,guard):
+        from .planning import PathPlanner, Pose
+        original_guard=guard
+        def guard():
+            original_guard();self.fresh_joints()
+        template=copy.deepcopy(self.fresh_joints())
+        def seed(q):
+            m=copy.deepcopy(template);m.name=list(self.cfg['joint_names']);m.position=list(q)
+            return m
+        def forward(q):
+            r=self.solve(None,None,guard,True,seed(q));p=r.tcp_pose.pose
+            return Pose((p.position.x,p.position.y,p.position.z),
+                        (p.orientation.x,p.orientation.y,p.orientation.z,p.orientation.w))
+        def inverse(point,orientation,q):
+            r=self.solve(point,orientation,guard,seed=seed(q))
+            if len(r.solution.name)!=6 or set(r.solution.name)!=set(self.cfg['joint_names']) or not finite_vector(r.solution.position,6):
+                raise Failure('MOTION_FAILED','IK joint mapping mismatch')
+            values=dict(zip(r.solution.name,r.solution.position))
+            return tuple(values[n] for n in self.cfg['joint_names'])
+        lower=self.rospy.get_param('/arm_left/arm_trajectory/joint_lower_rad')
+        upper=self.rospy.get_param('/arm_left/arm_trajectory/joint_upper_rad')
+        return PathPlanner(self.cfg,lower,upper,forward,inverse,guard)
+
+    def preflight(self,surface,profile,guard,remaining=False):
+        # Full route validation issues only FK/IK requests, never trajectory goals.
+        self.planner(guard).plan(self.measured(),surface,remaining)
+
+    def execute_plan(self,planner,points,start,guard,feedback):
+        expected=tuple(start)
+        for point in points:
+            guard();actual=self.measured()
+            if max(abs(a-b) for a,b in zip(actual[:5],expected[:5]))>.035:
+                raise Failure('MOTION_FAILED','arm deviated from preflight path')
+            target=tuple(point.joints[:5])+(actual[5],)
+            # Recheck the swept path from measured (quantized) feedback, not only
+            # the ideal predecessor. Never replay a stale path blindly.
+            planner.edge(actual,target,point.floor)
+            feedback(point.step,planner.forward(target).position)
+            self.trajectory(target,guard);expected=target
+
+    def prepare(self,surface,profile,guard,feedback):
+        planner=self.planner(guard);start=self.measured()
+        points,_=planner.plan(start,surface)
+        self.execute_plan(planner,points,start,guard,feedback)
+
     def trajectory(self,positions,guard):
         from control_msgs.msg import FollowJointTrajectoryGoal
         from trajectory_msgs.msg import JointTrajectoryPoint
@@ -150,13 +205,9 @@ class RosArmBackend:
         self.fresh_joints()
 
     def move(self,point,orientation,guard):
-        reply=self.solve(point,orientation,guard)
-        if set(reply.solution.name)!=set(self.cfg['joint_names']):raise Failure('MOTION_FAILED','IK joint mapping mismatch')
-        values=dict(zip(reply.solution.name,reply.solution.position))
-        # IK controls joints 1..5; gripper is always preserved from measured feedback.
-        current=dict(zip(self.fresh_joints().name,self.fresh_joints().position))
-        values[self.cfg['joint_names'][5]]=current[self.cfg['joint_names'][5]]
-        self.trajectory([values[n] for n in self.cfg['joint_names']],guard)
+        planner=self.planner(guard);start=self.measured()
+        points,_=planner.segment(start,point,orientation,'VISUAL_CORRECTION')
+        self.execute_plan(planner,points,start,guard,lambda *a:None)
 
     def grip(self,value,guard):
         m=self.fresh_joints();values=dict(zip(m.name,m.position))

@@ -82,7 +82,15 @@ def validate_config(cfg):
     if any(a>=b for a,b in zip(cfg['workspace_min'],cfg['workspace_max'])):raise ValueError('empty workspace')
     if not math.isfinite(cfg['safe_tcp_min_height_m']) or cfg['safe_tcp_min_height_m']<0:raise ValueError('invalid table clearance')
     if len(cfg['joint_names'])!=6 or len(set(cfg['joint_names']))!=6:raise ValueError('invalid joint mapping')
+    for key,default,upper in (('planning_joint_step_rad',.35,.35),('planning_rotation_step_rad',.1,.1)):
+        value=cfg.get(key,default)
+        if not math.isfinite(value) or not 0<value<=upper:raise ValueError('invalid '+key)
     for p in cfg['profiles'].values():
+        escapes=p.get('transition_joint_waypoints_rad',[])
+        if not isinstance(escapes,list) or len(escapes)>cfg['max_motion_steps'] or any(not finite_vector(q,5) for q in escapes):
+            raise ValueError('transition requires a bounded list of five-joint waypoints')
+        if escapes and p.get('transition_calibrated') is not True:
+            raise ValueError('joint transition requires explicit calibration')
         if not finite_vector(p['orientation_xyzw'],4) or abs(sum(v*v for v in p['orientation_xyzw'])-1)>1e-4:
             raise ValueError('unit quaternion required')
         for k in ('surface_to_grasp','transport_position'):
@@ -247,6 +255,8 @@ class Engine:
             o=self.observe()
             if not self.profile['min_object_height_m']<=dot(o.position,self.profile['vertical_axis'])-self.profile['table_plane_offset_m']<=self.profile['max_object_height_m']:
                 raise Failure('NEEDS_REPOSITION','target surface outside calibrated tabletop height band')
+            self.report('PREFLIGHT_PATH',o.position)
+            self.backend.preflight(o.position,self.profile,self.guard)
             self.report('PREPARE')
             self.backend.grip(self.profile['open_rad'],self.guard)
             o=self.observe(o.position,(o.class_id,o.label,o.color),after=self.now())
@@ -254,6 +264,8 @@ class Engine:
             height=dot(o.position,self.profile['vertical_axis'])-self.profile['table_plane_offset_m']
             if not self.profile['min_object_height_m']<=height<=self.profile['max_object_height_m']:
                 raise Failure('NEEDS_REPOSITION','target surface outside calibrated tabletop height band')
+            self.backend.prepare(o.position,self.profile,self.guard,
+                                 lambda step,point:self.report(step,point))
             self.original_surface=o.position
             stable=0
             self.report('SERVO_PREGRASP',o.position)
@@ -285,6 +297,9 @@ class Engine:
             self.original_surface=o.position
             grasp=tuple(a+b for a,b in zip(o.position,self.profile['surface_to_grasp']))
             self.guard()
+            # The selected fruit may have moved during visual alignment. Recheck
+            # descent/lift/transport before entering the final occluded segment.
+            self.backend.preflight(o.position,self.profile,self.guard,remaining=True)
             # Validated final short descent tolerates expected gripper occlusion.
             if self.profile['approach_height'] > self.cfg['max_final_descent']:
                 raise Failure('NOT_READY','final descent exceeds calibrated occlusion segment')
@@ -304,7 +319,10 @@ class Engine:
                 self.verify(identity,contact,lift)
             transport=self.profile['transport_position']
             normal=self.profile['vertical_axis']
-            self.path(add_scaled(lift,normal,max(0.,dot(transport,normal)-dot(lift,normal))),'MOVE_TO_TRANSPORT_POSE')
+            clearance=max(dot(lift,normal),dot(transport,normal),
+                          self.profile['table_plane_offset_m']+self.profile['transit_clearance_height_m'])
+            self.path(add_scaled(lift,normal,clearance-dot(lift,normal)),'MOVE_TO_TRANSPORT_POSE')
+            self.path(add_scaled(transport,normal,clearance-dot(transport,normal)),'MOVE_TO_TRANSPORT_POSE')
             self.path(transport,'MOVE_TO_TRANSPORT_POSE')
             if self.verification_mode=='disappearance':
                 self.guard()
