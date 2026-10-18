@@ -14,10 +14,10 @@ def encode(joints,signs,offsets):
 def decode(raw,signs,offsets):
     return [math.radians((v-o)*s) for v,s,o in zip(raw,signs,offsets)]
 
-def validate_target(names,positions,expected,lower,upper):
+def validate_target(names,positions,expected,lower,upper,check_limits=True):
     if len(names)!=6 or len(set(names))!=6 or set(names)!=set(expected) or len(positions)!=6:
         raise ValueError('exactly the six configured unique joint names required')
     values=dict(zip(names,positions));ordered=[values[n] for n in expected]
-    if not all(math.isfinite(v) and lo<=v<=hi for v,lo,hi in zip(ordered,lower,upper)):
+    if not all(math.isfinite(v) and (not check_limits or lo<=v<=hi) for v,lo,hi in zip(ordered,lower,upper)):
         raise ValueError('nonfinite or out-of-range joint position')
     return ordered

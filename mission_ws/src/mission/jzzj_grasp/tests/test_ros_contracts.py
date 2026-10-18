@@ -182,6 +182,35 @@ class DriverContractTests(unittest.TestCase):
     def test_nan_or_duplicate_joint_rejects(self):
         self.g.trajectory.points[0].positions[0]=float('nan');h=Handle(self.g);self.d.goal(h)
         self.assertEqual(h.status,'rejected')
+    def test_finite_out_of_range_target_reaches_per_servo_filter(self):
+        self.g.trajectory.points[0].positions[4]=10000.;h=Handle(self.g)
+        with patch.object(self.module.threading,'Thread'):self.d.goal(h)
+        self.assertEqual(h.status,'accepted')
+    def test_partial_command_finishes_valid_servos_without_claiming_full_arrival(self):
+        from checked_arm_sdk import CheckedArmDevice
+        from test_servo_position_limits import ClippingVendor
+        class Clock:
+            t=0.
+            def monotonic(self):return self.t
+            def sleep(self,seconds):self.t+=seconds
+        clock=Clock();self.d.io=threading.RLock();self.d.signs=[1,-1,1,1,1,1];self.d.offsets=[0]*6
+        self.d.device=CheckedArmDevice(factory=ClippingVendor)
+        target=[.1]*6;target[4]=10000.
+        def sample():
+            actual=[.1 if clock.t>=.2 else 0.]*6;actual[4]=0.
+            return actual,int(clock.t/.1)
+        self.d.sample=sample;h=Handle(self.g)
+        with patch.object(self.module.time,'monotonic',clock.monotonic), \
+             patch.object(self.module.time,'sleep',clock.sleep):
+            self.d.execute(h,target,.8,1.,[.035]*6)
+        calls=self.d.device.bus.bus.calls
+        self.assertEqual([call[2][0] for call in calls],[1,2,3,4,6])
+        self.assertTrue(all(call[1]==0x19 for call in calls))
+        self.assertGreaterEqual(clock.t,.4)
+        self.assertEqual(h.status,'aborted');self.assertEqual(h.result.error_code,-5)
+        self.assertIn('skipped servos (5,)',h.result.error_string)
+        self.assertIn('measured settled',h.result.error_string)
+        self.assertFalse(self.d.poisoned)
     def test_unsupported_velocity_does_not_silently_ignore(self):
         self.g.trajectory.points[0].velocities=[0]*6;h=Handle(self.g);self.d.goal(h)
         self.assertEqual(h.status,'rejected')

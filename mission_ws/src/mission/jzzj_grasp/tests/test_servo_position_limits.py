@@ -47,23 +47,30 @@ class ServoPositionTests(unittest.TestCase):
         self.sdk=boundary.CheckedArmDevice(factory=ClippingVendor)
         self.calls=self.sdk.bus.bus.calls
         self.sleep=patch('time.sleep');self.sleep.start();self.addCleanup(self.sleep.stop)
+        if hasattr(boundary,'LOGGER'):
+            log=patch.object(boundary.LOGGER,'warning');log.start();self.addCleanup(log.stop)
     def test_all_six_positions_accept_both_inclusive_boundaries(self):
         for value in (96,4000):
             self.calls.clear();self.sdk.write_positions([value]*6,800)
             self.assertEqual(self.calls,[(0x10,0x1e,[3,32]),
                 (0x10,0x1d,[b for _ in range(6) for b in (value>>8,value&255)])])
-    def test_one_bad_position_rejects_whole_batch_before_any_bus_write(self):
+    def test_only_bad_servo_is_skipped_and_other_five_execute(self):
         for index in range(6):
             for bad in (0,95,4001,-1,65535,96.,True):
                 self.calls.clear();values=[2040]*6;values[index]=bad
-                with self.assertRaises(ValueError):self.sdk.write_positions(values,800)
-                self.assertEqual(self.calls,[])
-    def test_extreme_angle_is_rejected_instead_of_vendor_clipping(self):
+                result=self.sdk.write_positions(values,800)
+                self.assertFalse(result.complete)
+                self.assertEqual(result.skipped_ids,(index+1,))
+                self.assertEqual(result.sent_ids,tuple(i for i in range(1,7) if i!=index+1))
+                self.assertEqual(self.calls,[(0x10,0x19,[i,7,248,3,32]) for i in result.sent_ids])
+    def test_extreme_angle_skips_only_its_servo_without_vendor_clipping(self):
         for index in range(6):
             for bad in (-10000.,10000.,float('nan'),float('inf')):
                 self.calls.clear();values=[0.]*6;values[5]=60.;values[index]=bad
-                with self.assertRaises(ValueError):self.sdk.Arm_serial_servo_write6(*values,800)
-                self.assertEqual(self.calls,[])
+                result=self.sdk.Arm_serial_servo_write6(*values,800)
+                self.assertEqual(result.skipped_ids,(index+1,))
+                self.assertEqual(len(self.calls),5)
+                self.assertTrue(all(c[1]==0x19 and c[2][0]!=index+1 for c in self.calls))
     def test_105_degree_joint4_is_encoded_without_90_degree_clipping(self):
         self.sdk.Arm_serial_servo_write6(0,0,0,105,0,60,800)
         data=self.calls[-1][2]
@@ -73,7 +80,8 @@ class ServoPositionTests(unittest.TestCase):
     def test_single_servo_uses_same_bounds_and_no_send_on_rejection(self):
         for servo_id in range(1,7):
             self.calls.clear()
-            with self.assertRaises(ValueError):self.sdk.Arm_serial_servo_write(servo_id,10000.,800)
+            result=self.sdk.Arm_serial_servo_write(servo_id,10000.,800)
+            self.assertEqual(result.skipped_ids,(servo_id,));self.assertEqual(result.sent_ids,())
             self.assertEqual(self.calls,[])
             degrees=position_to_angle(servo_id,96,True)
             self.sdk.Arm_serial_servo_write(servo_id,degrees,800)
@@ -104,6 +112,17 @@ class ServoPositionTests(unittest.TestCase):
             with self.assertRaises(ValueError):self.sdk.write_positions([2040]*6,duration)
         with self.assertRaises(ValueError):self.sdk.write_positions([2040]*5,800)
         self.assertEqual(self.calls,[])
+    def test_all_invalid_positions_send_nothing_and_report_all_skipped(self):
+        result=self.sdk.write_positions([0,95,4001,-1,None,True],800)
+        self.assertEqual(self.calls,[])
+        self.assertEqual(result.sent_ids,())
+        self.assertEqual(result.skipped_ids,(1,2,3,4,5,6))
+    def test_two_invalid_positions_never_receive_a_replacement_target(self):
+        result=self.sdk.write_positions([96,95,2000,4001,4000,1000],1200)
+        self.assertEqual(result.sent_ids,(1,3,5,6));self.assertEqual(result.skipped_ids,(2,4))
+        self.assertEqual(self.calls,[(0x10,0x19,[1,0,96,4,176]),
+            (0x10,0x19,[3,7,208,4,176]),(0x10,0x19,[5,15,160,4,176]),
+            (0x10,0x19,[6,3,232,4,176])])
 
 
 if __name__=='__main__':unittest.main()

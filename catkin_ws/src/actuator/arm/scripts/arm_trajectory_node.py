@@ -90,10 +90,10 @@ class TrajectoryDriver:
             return list(self.current),self.sequence
 
     def write(self,q,seconds):
-        validate_target(self.names,q,self.names,self.lower,self.upper)
+        validate_target(self.names,q,self.names,self.lower,self.upper,check_limits=False)
         raw=encode(q,self.signs,self.offsets)
         with self.io:
-            self.device.Arm_serial_servo_write6(*raw,int(seconds*1000))
+            return self.device.Arm_serial_servo_write6(*raw,int(seconds*1000))
 
     def goal(self,gh):
         try:
@@ -105,7 +105,7 @@ class TrajectoryDriver:
                 if g.path_tolerance:raise ValueError('path tolerances unsupported; use incremental goals')
                 p=t.points[0]
                 if p.velocities or p.accelerations or p.effort:raise ValueError('position-only trajectories required')
-                q=validate_target(t.joint_names,p.positions,self.names,self.lower,self.upper)
+                q=validate_target(t.joint_names,p.positions,self.names,self.lower,self.upper,check_limits=False)
                 seconds=p.time_from_start.to_sec()
                 if not math.isfinite(seconds) or not .2<=seconds<=5.:raise ValueError('duration must be 0.2..5 seconds')
                 tolerance=[self.tolerance]*6
@@ -126,14 +126,15 @@ class TrajectoryDriver:
             if self.active is not None and gh.get_goal_id().id==self.active.get_goal_id().id:self.cancel.set()
             else:gh.set_canceled(FollowJointTrajectoryResult(error_code=0,error_string='not active'))
 
-    def converged(self,target,end,tolerances,allow_cancel):
+    def converged(self,target,end,tolerances,allow_cancel,indices=None):
         last=-1;stable=0;previous=None
+        indices=range(6) if indices is None else indices
         while time.monotonic()<end:
             if allow_cancel and self.cancel.is_set():return False
             q,seq=self.sample()
             if seq!=last:
                 quiet=previous is not None and all(abs(a-b)<=self.settle_delta for a,b in zip(q,previous))
-                stable=stable+1 if quiet and all(abs(a-b)<=tol for a,b,tol in zip(q,target,tolerances)) else 0
+                stable=stable+1 if quiet and all(abs(q[i]-target[i])<=tolerances[i] for i in indices) else 0
                 previous=q;last=seq
                 if stable>=3:return True
             time.sleep(.02)
@@ -141,7 +142,8 @@ class TrajectoryDriver:
 
     def hold(self):
         try:
-            q,_=self.sample();self.write(q,.25)
+            q,_=self.sample();report=self.write(q,.25)
+            if report is not None and not report.complete:return False
             return self.converged(q,time.monotonic()+self.stop_timeout,[self.tolerance]*6,False)
         except Exception:return False
 
@@ -149,13 +151,21 @@ class TrajectoryDriver:
     def execute(self,gh,q,seconds,extra,tolerances):
         terminal='aborted'
         try:
-            self.write(q,seconds)
-            ok=self.converged(q,time.monotonic()+seconds+extra,tolerances,True)
+            report=self.write(q,seconds)
+            partial=report is not None and not report.complete
+            if partial:
+                ok=self.converged(q,time.monotonic()+seconds+extra,tolerances,True,
+                                  tuple(i-1 for i in report.sent_ids))
+            else:ok=self.converged(q,time.monotonic()+seconds+extra,tolerances,True)
             if self.cancel.is_set():
                 stopped=self.hold();self.poisoned=not stopped
                 terminal='canceled' if stopped else 'aborted'
                 result=FollowJointTrajectoryResult(error_code=0 if stopped else -5,
                     error_string='measured hold confirmed' if stopped else 'STOP_FAILED')
+            elif ok and partial:
+                result=FollowJointTrajectoryResult(error_code=-5,
+                    error_string='partial command: sent servos {}; skipped servos {} outside position limits; measured settled'.format(
+                        report.sent_ids,report.skipped_ids))
             elif ok:
                 m,_=self.sample();f=FollowJointTrajectoryFeedback();f.header.stamp=rospy.Time.now();f.joint_names=self.names
                 f.desired.positions=q;f.actual.positions=m;f.error.positions=[a-b for a,b in zip(q,m)];gh.publish_feedback(f)

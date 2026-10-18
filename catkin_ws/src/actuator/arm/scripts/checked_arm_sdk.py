@@ -1,7 +1,20 @@
 """Project-local I2C boundary: reject bad positions and propagate bus errors."""
 import time
+import logging
+from dataclasses import dataclass
 from servo_protocol import (POSITION_MIN, POSITION_MAX, validate_position_range,
-    validate_positions, validate_servo_id, angle_to_position, position_to_angle, duration_bytes)
+    validate_servo_id, angle_to_position, position_to_angle, duration_bytes)
+
+LOGGER=logging.getLogger(__name__)
+
+
+@dataclass(frozen=True)
+class CommandResult:
+    sent_ids: tuple
+    skipped_ids: tuple
+
+    @property
+    def complete(self):return not self.skipped_ids
 
 
 class CheckedBus:
@@ -39,6 +52,7 @@ class CheckedArmDevice:
             raise ValueError('SDK arm address mismatch')
         self.bus = CheckedBus(self.device.bus)
         self.device.bus = self.bus
+        self.last_command_result=None
 
     def _call(self, name, *args):
         # The trajectory driver serializes each complete SDK operation with its I/O lock.
@@ -69,27 +83,55 @@ class CheckedArmDevice:
 
     def write_positions(self, positions, milliseconds):
         if len(positions)!=6:raise ValueError('six servo positions required')
-        positions=validate_positions(positions,self.position_min,self.position_max)
         timing=duration_bytes(milliseconds)
-        data=[byte for p in positions for byte in ((p>>8)&255,p&255)]
-        # Validate the ENTIRE batch before even the timing-register write.
+        valid=[];skipped=[]
+        for servo_id,position in enumerate(positions,1):
+            if type(position) is int and self.position_min<=position<=self.position_max:
+                valid.append((servo_id,position))
+            else:skipped.append(servo_id)
+        report=CommandResult(tuple(i for i,_ in valid),tuple(skipped))
         self.bus.error=None
-        self.bus.write_i2c_block_data(self.addr,0x1e,timing)
-        self.bus.write_i2c_block_data(self.addr,0x1d,data)
-        return positions[-1]  # Preserve the old SDK return convention, not a success code.
+        self.last_command_result=None
+        if not skipped:
+            data=[byte for _,p in valid for byte in ((p>>8)&255,p&255)]
+            self.bus.write_i2c_block_data(self.addr,0x1e,timing)
+            self.bus.write_i2c_block_data(self.addr,0x1d,data)
+        else:
+            # No command, including a replacement/hold target, goes to skipped
+            # servo IDs. Individual writes preserve every valid target and time.
+            for servo_id,position in valid:
+                self.bus.write_i2c_block_data(self.addr,0x19,
+                    [servo_id,(position>>8)&255,position&255]+timing)
+        self.last_command_result=report
+        if skipped:
+            LOGGER.warning('servo command partial: sent %s; skipped %s (position %s..%s)',
+                report.sent_ids,report.skipped_ids,self.position_min,self.position_max)
+        return report
 
     def Arm_serial_servo_write6(self, *args):
         if len(args)!=7:raise ValueError('six angles and duration required')
-        positions=[angle_to_position(i,v,self.left) for i,v in enumerate(args[:6],1)]
+        positions=[]
+        for i,v in enumerate(args[:6],1):
+            try:positions.append(angle_to_position(i,v,self.left))
+            except (ValueError,TypeError,OverflowError):positions.append(None)
         return self.write_positions(positions,args[6])
 
     def Arm_serial_servo_write(self, servo_id, degrees, milliseconds=800):
-        position=angle_to_position(servo_id,degrees,self.left)
-        validate_positions([position],self.position_min,self.position_max)
+        validate_servo_id(servo_id)
         timing=duration_bytes(milliseconds)
+        try:position=angle_to_position(servo_id,degrees,self.left)
+        except (ValueError,TypeError,OverflowError):position=None
+        if type(position) is not int or not self.position_min<=position<=self.position_max:
+            report=CommandResult((),(servo_id,));self.last_command_result=report
+            LOGGER.warning('servo %s command skipped: position outside %s..%s',
+                servo_id,self.position_min,self.position_max)
+            return report
         self.bus.error=None
+        self.last_command_result=None
         self.bus.write_i2c_block_data(self.addr,0x19,[servo_id,(position>>8)&255,position&255]+timing)
         time.sleep(.1)
+        report=CommandResult((servo_id,),());self.last_command_result=report
+        return report
 
     def Arm_serial_set_torque(self, enabled):
         return self._call('Arm_serial_set_torque', enabled)
