@@ -1,16 +1,29 @@
-# 相机、失位停车和水果类别合并修改说明
+# 相机方向、失位停车和水果类别合并修改说明
 
 修改日期：2026-10-18。直接修改 `F:\orangepipro\jzzj_plus` 内源码，项目目录与名称保持不变。按用户确认，使用现有模型，不重新训练。
 
-## 1. 相机上下翻转
+## 1. 相机已物理调整，默认取消软件翻转（本次更新）
 
-- HP60C 的 RGB、深度和可选 mono8 发布图像上下翻转；USB 图像同样处理。使用竖直行反射，相当于 `cv::flip(image, image, 0)`。
-- `hp60c.launch`、`usb_cam.launch` 的 `flip_vertical` 参数默认 `true`；可通过 `flip_vertical:=false` 关闭。HP60C 的其他 SDK 型号启动文件仍保持原行为。
-- RGB 与深度必须一起翻转，CameraInfo 同步应用 `K'=F*K`、`P'=F*P`，其中 `F=[[1,0,0],[0,-1,H-1],[0,0,1]]`。因此 `fy'=-fy`、`cy'=H-1-cy`，物理光学坐标、外参和深度单位保持原定义。当前验证针对全幅图像，不包含 ROI/binning 裁剪组合。
-- 公共行翻转与标定实现位于 `catkin_ws/src/user_msgs/include/user_msgs/image_orientation.h`；相机包增加对应头文件依赖。原始模型文件与图像像素通道顺序不变。
-- 阶段 C 的深度配准和三维提取允许有符号焦距，仍拒绝零焦距和非有限内参。AprilTag 通过负 `fy` 识别输入已翻转，在解码/PnP 前恢复传感器图像与内参，避免镜像破坏 Tag 手性，输出位姿仍对应原物理坐标系。
+- 根据用户最新安装状态，`hp60c.launch`、`usb_cam.launch` 的 `flip_vertical` 默认值均改为 `false`，USB YAML、驱动参数缺省值和成员初值同步关闭。HP60C 驱动缺省值原本为 `false`，本次保持一致。
+- `hp60c_clean.launch` 和 `hp60cn.launch` 也显式设置默认 `false`。这两个入口复用 `ascamera_hp60c` 节点名，显式写参数可防止切换入口时沿用参数服务器中残留的旧 `true`。
+- 默认发布原传感器方向的 RGB、深度和 mono8；CameraInfo 的 K/P 不做行反射，正常标定的 `fx/fy` 为正，也不额外改变 `cy`。保持采集时间戳、深度单位与像素通道顺序。
+- 相机驱动启动时打印实际方向模式，默认应看到 `native sensor pixels (no software flip)`。已检查引用 HP60C 的阶段 C、模型探针、AprilTag、导航和旧任务入口，它们继承新的相机默认值，没有另外开启翻转。
+- AprilTag 正常内参路径直接处理原图、输出当前光学坐标系的位姿。仅对旧软件反射输入（负 `fy`）保留还原分支，并打印模式；物理转动相机本身不应通过负 `fy` 表示。USB 离线标定文件来自目标机，不在本目录，需确认它对应原始传感器像素。
+- `flip_vertical:=true` 仍作为显式兼容开关保留，此模式才会同步翻转图像与 K/P；公共图像头和有符号焦距支持继续供兼容路径使用。当前安装应使用 `false`，旧脚本或 ROS 参数服务器中残留的 `true` 需要一并改掉。不能用 `abs(fy)` 单独“修复”不匹配的图像与内参。
 
-主要源码：`sensor/ascamera/src/CameraPublisher.cpp`、`sensor/usb_cam/src/UsbCam.cpp`、`algorithm/detection/apriltag_localization/src/apriltag_localization_node.cpp`（均在 `catkin_ws/src` 内）及 `mission_ws/src/mission/jzzj_visual_servo/src/jzzj_visual_servo/perception.py`。
+### 物理调整对 Tag 定位和抓取的影响
+
+关闭软件翻转与物理转动相机是两件事。Tag 可在当前原图上解码和求位姿，但相机相对车体/机械臂的实际安装方向已经改变，因此旧 `camera_to_arm`、车体到相机外参和静态 TF 需要重新核验，必要时重新标定；不能保证旧外参仍可用。内参对应传感器像素，不能仅因物理转动就手动取负焦距或反射主点。
+
+附件中的外参已包含一次机械臂 Z 轴 180° 偏航修正，它与相机物理旋转不等价。本次没有完整实测矩阵和新的安装位姿，不猜测欧拉角、不重复叠加 180°。重装可能还改变光心位置，需用已知实物点检查臂系落点和桌面法向，再决定是否可沿用或需重新标定。
+
+本次代码/配置涉及 `catkin_ws/src` 内的 `sensor/ascamera/launch/hp60c.launch`、`hp60c_clean.launch`、`hp60cn.launch`、`sensor/ascamera/src/CameraPublisher.cpp`、`sensor/usb_cam/launch/usb_cam.launch`、`sensor/usb_cam/src/UsbCam.cpp`、`sensor/usb_cam/include/usb_cam/UsbCam.h`、`user_params/params/usb_cam_config.yaml` 和 `algorithm/detection/apriltag_localization/src/apriltag_localization_node.cpp`。深度投影算法无需为正常正焦距再加一层方向补偿。
+
+### 交接附件与本目录的版本差异
+
+附件记录的 `/home/orangepi/jzzj-stagec/deploy/` 含平面定位、实测外参、TCP、关节符号和反馈超时配置，本目录没有这些现场文件，也没有附件提到的 `detections_merger.py`；当前本地 observer 仍为 RGB-D 版本，本地检测器直接发布总话题。不能把本目录整包覆盖到现场实际运行副本，否则可能丢失平面定位等现场修复。
+
+本次仅调整相机方向默认值及相关日志/说明，不以本地模板替换现场的外参、TCP、关节符号、平面高度或 I2C 容错参数。相机安装变化后的新标定值须在现场部署配置中更新。
 
 ## 2. 定位丢失停车
 
@@ -43,9 +56,10 @@
 
 详细模型约定见 [MODEL_FRUIT6.md](../mission_ws/src/mission/jzzj_grasp/MODEL_FRUIT6.md)。
 
-## 4. 已完成验证
+## 4. 已完成验证（本次重新运行）
 
 - Python 共运行 115 项：112 项通过，3 项因未提供外部模型历史资料而跳过。
+- 53 个 launch/package XML 解析通过，相机启动参数/YAML 的不翻转默认值及文档链接检查通过；`git diff --check` 通过。
 - 新增 9 项回归直接调用导航类的实际回调/控制周期及 RGB-D 算法，覆盖行驶后丢位、持续停车、重复时间戳、旧位姿配合 true 标志、无效时间戳/四元数、双源切换、恢复和退出停车，以及翻转前后三维位置/未配准深度投影一致性。ROS、GUI 和测试中恒等朝向的 SciPy 转换使用内存替身。
 - 主机 g++ 编译并运行真实 `postprocess.cc` 与公共图像头文件测试，验证奇偶行/行填充、字节保持、双翻转还原、K/P 反射、六个类别映射、同种去重、不同水果保留、置信度排序、空检测和错误映射拒绝。编译仅有原文件未使用参数/函数警告。
 - 原有离线模型历史解码默认仍输出原始六类，用于核对旧 golden 资料，不等于线上二种类输出；增加了实际叠加回调接受种类标签的测试。
@@ -68,6 +82,35 @@ g++ -std=c++14 -I catkin_ws/src/user_msgs/include \
 当前环境没有 ROS/ARM64 相机与 RKNN 运行环境，未进行目标机完整 catkin 编译、真实推理及车辆停车距离测量。原工作空间顶层 CMake、缺失旧消息/后置节点等构建前置问题仍在原审查范围内。
 
 1. 在目标机重新构建涉及的 `user_msgs`、相机、AprilTag、YOLO 包并加载两个工作空间；不能只拷贝 YAML 而继续运行旧二进制。
-2. 检查 RGB/深度方向、同帧 CameraInfo 和负 `fy`，确认 AprilTag 仍能正常识别，已标定物体坐标在翻转前后保持一致。
+2. 使用本节下方的“不翻转部署步骤”，检查原图 RGB/深度方向和同帧 CameraInfo，正常 `fx/fy` 应为正，AprilTag 日志应为不翻转。用已知点重新核验物理安装后的车体定位和臂系坐标；这次不能用“旧外参保持不变、物体坐标应自动一致”作为验收假设。
 3. 在受控测试条件下分别遮挡前相机、遮挡两相机和断开图像源；观察 `car_cmd`/`cmd_vel`。两源失效后应收到 HOLD 和持续全零速度；Bool false 在下一控制周期处理，静默断流在超时后处理。恢复定位后确认正常重启导航且无旧速度跳变。
 4. 分别展示樱桃、柠檬及不同状态样本，检查输出只有 `0/cherry` 和 `1/lemon`，同水果重复框被抑制，两种水果可同时保留。
+
+### 不翻转部署步骤（尚未远程执行）
+
+附件明确 `/home/orangepi/jzzj-stagec` 是快照，`/home/orangepi/mission_ws` 才是实际 ROS 运行副本。先在启动终端确认包路径，按本次文件清单同步对应改动；相机 C++ 包实际属于哪个工作空间，以 `rospack find` 结果为准，不假定它们都位于 mission_ws。
+
+```bash
+rospack find ascamera
+rospack find usb_cam
+rospack find apriltag_localization
+rospack find jzzj_visual_servo
+```
+
+在相应工作空间重新编译修改的 C++ 包，source 其 devel/setup.bash；若沿用交接环境存在 catkin 白名单缓存，构建时清空 `CATKIN_WHITELIST_PACKAGES`。保留现场平面模式源码与 deploy 配置。启动相机时显式使用：
+
+```bash
+roslaunch ascamera hp60c.launch flip_vertical:=false
+# 若还使用 USB 相机，在另一终端启动：
+roslaunch usb_cam usb_cam.launch flip_vertical:=false
+```
+
+若通过 `rosrun` 或现场自定义脚本启动，需先把对应节点的 `flip_vertical` 参数设为 `false`，并移除脚本里显式传入的 `true`；仅修改驱动缺省值不会覆盖 ROS 参数服务器中的已有值。节点重命名/命名空间变化时调整下列参数路径：
+
+```bash
+rosparam get /ascamera_hp60c/flip_vertical
+rosparam get /usb_cam/flip_vertical
+rostopic echo -n 1 /ascamera_hp60c/rgb0/camera_info
+```
+
+重启相机后，也重启读取内参的 AprilTag、观测与检测节点以清除旧缓存。特别是 AprilTag 只在启动时读取一次 CameraInfo，不能让它继续用旧的负焦距和旧方向分支处理新原图。然后先观察框、Tag、已知点落位，再按现场会话/心跳入口验证抓取。此次离线测试没有验证物理安装后的标定，也没有验证附件现场平面模式或真实抓取。

@@ -14,7 +14,9 @@ UsbCam::UsbCam(ros::NodeHandle &nh) {
     nh.param<std::string>("/usb_cam/camera_info_path", camera_info_path, "file:///home/jetson/.ros/camera_info/");
     nh.param<std::string>("/usb_cam/kill_switch_topic", kill_switch_topic, "/task");
     nh.param<bool>("/usb_cam/visualize", visualize, false);                  // show image or not.
-    nh.param<bool>("/usb_cam/flip_vertical", flip_vertical, true);
+    nh.param<bool>("/usb_cam/flip_vertical", flip_vertical, false);
+    ROS_INFO("USB image orientation: %s", flip_vertical ?
+             "software vertical flip (CameraInfo adjusted)" : "native sensor pixels (no software flip)");
 
     cam_info_manager = std::make_unique<camera_info_manager::CameraInfoManager>(nh, camera_name, camera_info_path + camera_name + "_calib.yaml");
     cam_info = cam_info_manager->getCameraInfo();
