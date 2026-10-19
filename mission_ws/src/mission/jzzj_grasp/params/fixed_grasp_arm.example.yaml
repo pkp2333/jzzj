@@ -1,0 +1,15 @@
+# This mapping reproduces the verified legacy terminal 'a' semantics.
+# Explicit launch confirmations are required before enabling the real driver.
+hardware_enabled: false
+calibration_confirmed: false
+workspace_clear_confirmed: false
+servo_signs: [1, -1, 1, 1, 1, 1]
+servo_offsets_deg: [0, 3, 0, 0, 0, 0]
+servo_position_min: 96
+servo_position_max: 4000
+servo_write_mode: individual
+position_tolerance_rad: 0.035
+feedback_timeout: 2.0
+feedback_period: 0.7
+stop_timeout: 5.0
+settle_delta_rad: 0.01

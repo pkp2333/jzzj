@@ -1,0 +1,12 @@
+<launch>
+  <!-- Driver only. Does not start legacy tests, IK, perception, or a grasp. -->
+  <arg name="real" default="false"/>
+  <arg name="calibration_confirmed" default="false"/>
+  <arg name="workspace_clear_confirmed" default="false"/>
+  <node pkg="arm" type="arm_trajectory_node.py" name="arm_trajectory" ns="arm_left" output="screen">
+    <rosparam command="load" file="$(find jzzj_grasp)/params/fixed_grasp_arm.example.yaml"/>
+    <param name="hardware_enabled" value="$(arg real)"/>
+    <param name="calibration_confirmed" value="$(arg calibration_confirmed)"/>
+    <param name="workspace_clear_confirmed" value="$(arg workspace_clear_confirmed)"/>
+  </node>
+</launch>

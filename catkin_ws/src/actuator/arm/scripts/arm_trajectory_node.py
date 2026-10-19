@@ -32,6 +32,8 @@ class TrajectoryDriver:
         self.tolerance=rospy.get_param('~position_tolerance_rad',.035)
         self.freshness=rospy.get_param('~feedback_timeout',1.5)
         self.read_period=rospy.get_param('~feedback_period',.1)
+        self.write_mode=rospy.get_param('~servo_write_mode','batch')
+        if self.write_mode not in ('batch','individual'):raise ValueError('servo_write_mode must be batch or individual')
         self.stop_timeout=rospy.get_param('~stop_timeout',3.)
         self.settle_delta=rospy.get_param('~settle_delta_rad',.01)
         if not all(math.isfinite(v) and v>0 for v in (self.tolerance,self.freshness,self.stop_timeout,self.settle_delta,self.read_period)):
@@ -104,6 +106,11 @@ class TrajectoryDriver:
         validate_target(self.names,q,self.names,self.lower,self.upper,check_limits=False)
         raw=encode(q,self.signs,self.offsets)
         with self.io:
+            if getattr(self,'write_mode','batch')=='individual':
+                from checked_arm_sdk import CommandResult
+                reports=[self.device.Arm_serial_servo_write(i+1,a,int(seconds*1000)) for i,a in enumerate(raw)]
+                return CommandResult(tuple(i for r in reports for i in r.sent_ids),
+                                     tuple(i for r in reports for i in r.skipped_ids))
             return self.device.Arm_serial_servo_write6(*raw,int(seconds*1000))
 
     def goal(self,gh):
