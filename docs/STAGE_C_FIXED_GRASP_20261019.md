@@ -109,3 +109,6 @@ bash tools/stage_c/start_fixed_grasp.sh \
 用户随后要求触发半径改为 50 mm；新配置 trigger_radius_m=0.050。保持 5/20 mm 旧参考文件兼容，现场私有运行副本必须显式更新为 0.05 才会扩大范围。三维距离判定、稳定观察 1 秒、至少 3 帧、帧间散布 5 mm、固定角度与参考点均保持原值。放宽触发范围不会根据目标坐标修正抓取角度。
 
 固定序列和一键启动相关 27 项离线测试通过，包括 49 mm 接受、51 mm 拒绝、各轴分别不超但三维合成距离超限、抖动拒绝、5/20 mm 文件兼容。本地代码已修改；未执行实体动作。
+## roslaunch 参数解析修复
+
+现场报错 unrecognized arguments: __name:=... __log:=...。原因是 argparse 直接读取了 roslaunch 自动附加的 ROS 重映射参数，抓取程序在初始化 ROS/视觉判断之前就退出。现在先使用 rospy.myargv 去除 ROS 参数，再进行严格 argparse 校验；未知业务选项仍报错。普通离线 check 不导入 rospy。固定抓取与启动相关 30 项离线测试通过，包括 launch 参数兼容、未知选项拒绝和无 ROS 环境 check。尚未执行实体动作。

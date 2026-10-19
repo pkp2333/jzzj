@@ -18,12 +18,40 @@ spec = importlib.util.spec_from_file_location('startup', ROOT / 'tools/stage_c/s
 startup = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(startup)
 
+runner_spec = importlib.util.spec_from_file_location('fixed_runner', ROOT / 'mission_ws/src/mission/jzzj_grasp/scripts/stage_c_fixed_grasp.py')
+runner = importlib.util.module_from_spec(runner_spec)
+runner_spec.loader.exec_module(runner)
+
 
 def graph(nodes=(), pubs=(), subs=()):
     return [list(pubs), list(subs), [('/service' + str(i), [n]) for i, n in enumerate(nodes)]]
 
 
 class StartupTests(unittest.TestCase):
+    def test_runner_accepts_roslaunch_remaps_using_ros_parser(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ref=Path(tmp)/'reference.json';ref.write_text(json.dumps(config()))
+            argv=['check','--reference',str(ref),'__name:=stage_c_fixed_grasp','__log:=/tmp/fixed.log']
+            ros_parser=unittest.mock.Mock(side_effect=lambda argv: [a for a in argv if ':=' not in a])
+            with patch.dict('sys.modules',{'rospy':types.SimpleNamespace(myargv=ros_parser)}):
+                with contextlib.redirect_stdout(io.StringIO()) as output:
+                    runner.main(argv)
+            ros_parser.assert_called_once_with(argv=['stage_c_fixed_grasp.py']+argv)
+            self.assertIn('No movement.',output.getvalue())
+
+    def test_runner_still_rejects_unknown_cli_flags(self):
+        with patch.dict('sys.modules',{'rospy':types.SimpleNamespace(myargv=lambda argv:[a for a in argv if ':=' not in a])}):
+            with contextlib.redirect_stderr(io.StringIO()),self.assertRaises(SystemExit) as error:
+                runner.main(['check','--reference','unused.json','--bogus','__name:=fixed'])
+            self.assertEqual(error.exception.code,2)
+
+    def test_runner_offline_check_does_not_require_ros(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ref=Path(tmp)/'reference.json';ref.write_text(json.dumps(config()))
+            with patch.dict('sys.modules',{'rospy':None}),contextlib.redirect_stdout(io.StringIO()) as output:
+                runner.main(['check','--reference',str(ref)])
+            self.assertIn('50mm',output.getvalue())
+
     def test_empty_graph_starts_dependencies(self):
         self.assertTrue(all(startup.launch_flags(graph()).values()))
 

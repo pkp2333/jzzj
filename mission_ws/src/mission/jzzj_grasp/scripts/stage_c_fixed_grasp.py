@@ -6,12 +6,13 @@ import json
 import math
 from pathlib import Path
 import signal
+import sys
 import threading
 import uuid
 from jzzj_grasp.fixed_grasp import validate_reference,FixedSequence,REAR_DEG,OPEN_DEG,CLOSE_DEG
 
 
-def main():
+def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('command',choices=('check','run','release'))
     p.add_argument('--reference',required=True)
@@ -21,7 +22,11 @@ def main():
     p.add_argument('--confirm-stopped-and-clear',action='store_true',help='arm stopped, gripper empty and area clear')
     p.add_argument('--session')
     p.add_argument('--wait-ready',type=float,default=0.,help='bounded startup readiness wait; does not bypass driver errors')
-    args=p.parse_args();cfg=json.loads(Path(args.reference).read_text(encoding='utf-8'))
+    argv=list(sys.argv[1:] if argv is None else argv)
+    if any(':=' in arg for arg in argv):
+        import rospy
+        argv=rospy.myargv(argv=['stage_c_fixed_grasp.py']+argv)[1:]
+    args=p.parse_args(argv);cfg=json.loads(Path(args.reference).read_text(encoding='utf-8'))
     if not math.isfinite(args.wait_ready) or not 0<=args.wait_ready<=60 or (args.wait_ready and args.command!='run'):
         p.error('--wait-ready requires run and a timeout in 0..60 seconds')
     validate_reference(cfg)
