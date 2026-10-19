@@ -1,0 +1,20 @@
+{
+  "version": 1,
+  "real_motion_enabled": false,
+  "angle_convention": "legacy_arm_test_terminal_degrees",
+  "rear_ready_command": "wb",
+  "rear_ready_angles_deg": [-90, 0, 90, 90, 0, 60],
+  "grasp_open_angles_deg": [-1, 56, 58, 50, 72, 60],
+  "grasp_close_angles_deg": [-1, 56, 58, 50, 72, 20],
+  "wait_before_close_seconds": 3.0,
+  "target_color": "yellow",
+  "arm_frame": "arm_left/arm_base_link",
+  "trigger_radius_m": 0.005,
+  "stable_seconds": 1.0,
+  "min_frames": 3,
+  "max_observation_age_seconds": 0.5,
+  "reference_position_m": null,
+  "reference_verified_reachable": false,
+  "physical_grasp_verified": false,
+  "notes": "Store the user's legacy terminal angles verbatim. No IK. This file does not execute motion; capture does not prove reachability, table height, holding, or safe joint mapping. Plane-mode Z is a table projection."
+}
