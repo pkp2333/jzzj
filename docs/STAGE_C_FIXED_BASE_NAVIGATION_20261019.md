@@ -136,3 +136,9 @@ bash tools/stage_c/fixed_grasp.sh release \
 160 项相关离线回归通过，覆盖单步坐标变换、50 mm 指令上限、20 mm 三维对齐阈值、定位/心跳丢失、实际单步超程、四个不同定位到位、HOLD 取消、底盘漂移拒绝、驱动看门狗、旧控制冲突、未标定启动拒绝和超过旧总行程/步数上限的对齐。ROS1 launch 及 ARM64 实机未运行。此前单臂最后保持首次失败、异常处理保持成功的问题没有在本任务中改写或跳过；抓取成功仍以人工确认记录，不能等同于整套动作验收。
 
 回退应先确认停稳、清空夹爪并退出本模式节点，再反向应用本次代码补丁；保留标定与运行记录。不要删除硬件锁或恢复标志强行交权。
+
+## 现场构建修复：AprilTag 包
+
+现场 CMake 首先报错 catkin_package 导出 include 目录不存在。该包只包含节点源文件，没有包内头文件；移除无效 INCLUDE_DIRS include 导出和本地 include 搜索项。同时将 geometry_msg 修正为 geometry_msgs，补充源码实际使用的 sensor_msgs、tf2_geometry_msgs 声明及 OpenCV include，改用 find_path/find_library 寻找 AprilTag 头文件和库，缺失时直接给出依赖错误。未改变检测、底盘或抓取逻辑。
+
+使用临时桩 catkin/OpenCV 依赖验证 CMake configure/generate 成功并检查 package.xml 依赖一致性；这仅为构建配置检查，不是 ROS1/ARM64 编译或实体测试。上位机仍需重新执行 build.sh --with-base-navigation，无需删除 build/devel 目录。

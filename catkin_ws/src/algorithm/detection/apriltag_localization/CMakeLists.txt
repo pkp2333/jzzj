@@ -15,13 +15,18 @@ find_package(catkin REQUIRED COMPONENTS
   tf2
   tf2_ros
   geometry_msgs
+  sensor_msgs
+  tf2_geometry_msgs
 )
 
 ## System dependencies are found with CMake's conventions
 # find_package(Boost REQUIRED COMPONENTS system)
 find_package(OpenCV 4.5.4 REQUIRED)
-set(apriltag_INCLUDE_DIRS /usr/local/include)
-set(apriltag_LIBRARIES /usr/local/lib/libapriltag.so)
+find_path(APRILTAG_INCLUDE_DIR NAMES apriltag/apriltag.h PATHS /usr/local/include)
+find_library(APRILTAG_LIBRARY NAMES apriltag PATHS /usr/local/lib)
+if(NOT APRILTAG_INCLUDE_DIR OR NOT APRILTAG_LIBRARY)
+  message(FATAL_ERROR "AprilTag headers/library not found; install the existing AprilTag dependency or set APRILTAG_INCLUDE_DIR and APRILTAG_LIBRARY")
+endif()
 
 ## Uncomment this if the package has a setup.py. This macro ensures
 ## modules and global scripts declared therein get installed
@@ -109,10 +114,8 @@ set(apriltag_LIBRARIES /usr/local/lib/libapriltag.so)
 ## CATKIN_DEPENDS: catkin_packages dependent projects also need
 ## DEPENDS: system dependencies of this project that dependent projects also need
 catkin_package(
-  INCLUDE_DIRS include
 #  LIBRARIES apriltag_localization
-  CATKIN_DEPENDS roscpp std_msgs cv_bridge image_transport tf2 tf2_ros geometry_msg
-  DEPENDS apriltag
+  CATKIN_DEPENDS roscpp std_msgs cv_bridge image_transport tf2 tf2_ros geometry_msgs sensor_msgs tf2_geometry_msgs
 )
 
 ###########
@@ -122,9 +125,9 @@ catkin_package(
 ## Specify additional locations of header files
 ## Your package locations should be listed before other locations
 include_directories(
-  include
   ${catkin_INCLUDE_DIRS}
-  ${apriltag_INCLUDE_DIRS}
+  ${OpenCV_INCLUDE_DIRS}
+  ${APRILTAG_INCLUDE_DIR}
 )
 
 ## Declare a C++ library
@@ -162,7 +165,7 @@ add_dependencies(apriltag_localization_node ${apriltag_localization_node_EXPORTE
 target_link_libraries(apriltag_localization_node 
   ${catkin_LIBRARIES} 
   ${OpenCV_LIBS} 
-  apriltag
+  ${APRILTAG_LIBRARY}
 )
 
 
