@@ -1,0 +1,29 @@
+<launch>
+  <arg name="reference"/>
+  <arg name="config"/>
+  <arg name="detector_config"/>
+  <arg name="real" default="false"/>
+  <arg name="calibration_confirmed" default="false"/>
+  <arg name="workspace_clear_confirmed" default="false"/>
+  <arg name="start_camera" default="true"/>
+  <arg name="start_observe" default="true"/>
+  <arg name="start_arm" default="true"/>
+  <arg name="target_color" default="yellow"/>
+  <include if="$(arg start_camera)" file="$(find ascamera)/launch/hp60c.launch">
+    <arg name="flip_vertical" value="false"/>
+  </include>
+  <include if="$(arg start_observe)" file="$(find jzzj_grasp)/launch/stage_c_observe_full.launch">
+    <arg name="config" value="$(arg config)"/>
+    <arg name="detector_config" value="$(arg detector_config)"/>
+    <arg name="target_color" value="$(arg target_color)"/>
+  </include>
+  <include if="$(arg start_arm)" file="$(find jzzj_grasp)/launch/stage_c_fixed_arm.launch">
+    <arg name="real" value="$(arg real)"/>
+    <arg name="calibration_confirmed" value="$(arg calibration_confirmed)"/>
+    <arg name="workspace_clear_confirmed" value="$(arg workspace_clear_confirmed)"/>
+    <arg name="required" value="true"/>
+  </include>
+  <node if="$(arg real)" pkg="jzzj_grasp" type="stage_c_fixed_grasp.py" name="stage_c_fixed_grasp"
+        args="run --reference &quot;$(arg reference)&quot; --real --confirm-base-immobilized --confirm-fixed-path-clear --wait-ready 40"
+        output="screen"/>
+</launch>

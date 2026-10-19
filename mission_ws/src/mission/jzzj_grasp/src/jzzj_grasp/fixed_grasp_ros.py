@@ -8,6 +8,36 @@ from .core import Failure,Observation,finite_vector
 from .fixed_grasp import ReferenceGate,SIGNS,OFFSETS_DEG,calibration_digest
 
 
+def wait_startup(rospy,seconds,cancel):
+    """Wait for actual dependency messages; never send commands or clear faults."""
+    from sensor_msgs.msg import JointState,CameraInfo
+    from jzzj_grasp_interfaces.msg import TargetObservations
+    from actionlib_msgs.msg import GoalStatusArray
+    end=time.monotonic()+seconds;reason='dependencies not yet available'
+    expected={'joint'+str(i) for i in range(1,7)}
+    while time.monotonic()<end and not rospy.is_shutdown():
+        if cancel.is_set():raise Failure('CANCELED','startup canceled')
+        try:
+            def message(topic,kind):
+                remaining=end-time.monotonic()
+                if remaining<=0:raise RuntimeError('startup deadline')
+                return rospy.wait_for_message(topic,kind,timeout=min(.5,remaining))
+            m=message('/arm_left/joint_states',JointState)
+            if (len(m.name)!=6 or set(m.name)!=expected or not finite_vector(m.position,6) or
+                    not 0<m.header.stamp.to_sec() or not -.05<=rospy.Time.now().to_sec()-m.header.stamp.to_sec()<=2.):
+                raise RuntimeError('six-joint feedback invalid/stale')
+            message('/arm_left/follow_joint_trajectory/status',GoalStatusArray)
+            perception=rospy.get_param('/stage_c_observer/perception')
+            message(perception['rgb_info_topic'],CameraInfo)
+            frame=message('/stage_c/observations',TargetObservations)
+            if not -.05<=rospy.Time.now().to_sec()-frame.header.stamp.to_sec()<=.5:
+                raise RuntimeError('observations stale')
+            return
+        except Exception as exc:
+            reason=str(exc);time.sleep(.1)
+    raise Failure('NOT_READY','startup readiness timeout: '+reason+'; inspect camera/observer/arm startup logs')
+
+
 class FixedArm(RosArmBackend):
     def solve(self,*a,**kw):raise Failure('NOT_READY','IK is forbidden in fixed grasp')
     def planner(self,*a,**kw):raise Failure('NOT_READY','Cartesian/IK planning is forbidden in fixed grasp')

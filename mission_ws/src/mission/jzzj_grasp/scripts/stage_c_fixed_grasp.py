@@ -3,6 +3,7 @@
 import argparse
 import datetime
 import json
+import math
 from pathlib import Path
 import signal
 import threading
@@ -19,7 +20,10 @@ def main():
     p.add_argument('--confirm-fixed-path-clear',action='store_true')
     p.add_argument('--confirm-stopped-and-clear',action='store_true',help='arm stopped, gripper empty and area clear')
     p.add_argument('--session')
+    p.add_argument('--wait-ready',type=float,default=0.,help='bounded startup readiness wait; does not bypass driver errors')
     args=p.parse_args();cfg=json.loads(Path(args.reference).read_text(encoding='utf-8'))
+    if not math.isfinite(args.wait_ready) or not 0<=args.wait_ready<=60 or (args.wait_ready and args.command!='run'):
+        p.error('--wait-ready requires run and a timeout in 0..60 seconds')
     validate_reference(cfg)
     if args.command=='check':
         print('Fixed rear:',REAR_DEG,'approach:',OPEN_DEG,'close:',CLOSE_DEG)
@@ -33,13 +37,16 @@ def main():
         p.error('release requires the original --session and --confirm-stopped-and-clear')
     import rospy
     from jzzj_grasp.execution_lease import ExecutionLease
-    from jzzj_grasp.fixed_grasp_ros import FixedRos
+    from jzzj_grasp.fixed_grasp_ros import FixedRos,wait_startup
     rospy.init_node('stage_c_fixed_grasp',anonymous=True,disable_signals=True)
     cancel=threading.Event();signal.signal(signal.SIGINT,lambda *a:cancel.set());rospy.on_shutdown(cancel.set)
     session=args.session or 'fixed-'+uuid.uuid4().hex
     print('Session:',session,flush=True)
     lease=ExecutionLease();io=None;result=None
     try:
+        if args.wait_ready:
+            print('Waiting for fresh camera/observations, six-joint feedback and trajectory server...',flush=True)
+            wait_startup(rospy,args.wait_ready,cancel)
         io=FixedRos(rospy,cfg,session,cancel)
         if args.command=='release':io.release(session);print('Fixed session released; no base command sent.');return
         result=FixedSequence(io,cfg).run()

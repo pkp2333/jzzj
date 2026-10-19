@@ -33,6 +33,7 @@ if(CATKIN_ENABLE_TESTING)
   add_test(NAME stage_c_taught_base COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_taught_base.py)
   add_test(NAME stage_c_taught_ros COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_taught_ros.py)
   add_test(NAME stage_c_fixed_grasp COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fixed_grasp.py)
+  add_test(NAME stage_c_fixed_startup COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fixed_startup.py)
   add_test(NAME stage_c_planning_kdl COMMAND ${CMAKE_COMMAND} -E env
     "STAGE_C_KDL_PROBE=$<TARGET_FILE:kinematics_regression>"
     ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_planning_kdl.py)

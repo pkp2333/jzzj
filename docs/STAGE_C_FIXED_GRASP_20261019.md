@@ -66,7 +66,32 @@ bash tools/stage_c/fixed_grasp.sh release \
 
 释放验证无活动轨迹并重新确认保持，只能清除本固定抓取会话的恢复标志，不能清除旧 C 服务 STOP_FAILED/持物锁存。Ctrl+C 或 `/stage_c/fixed_grasp/stop=true` 请求取消；反馈陈旧、通信错误、轨迹部分发送或停止失败时不推进后续步骤。不确认停稳时使用实体停止措施，不删锁文件强行交权。
 
-## 回退
+## 一键启动（2026-10-19 增补）
+
+在 Orange Pi 的 SSH 终端中执行，当前目录为 `/home/orangepi/jzzj`。部署本增补代码后先运行离线检查：
+
+```bash
+cd /home/orangepi/jzzj
+bash tools/stage_c/start_fixed_grasp.sh
+```
+
+默认只校验现有私有参考文件，不启动 ROS 节点、不发送动作。准备执行一次固定抓取时：
+
+```bash
+bash tools/stage_c/start_fixed_grasp.sh \
+  --reference .local/fixed_grasp/orange_reference_run.json \
+  --real --confirm-base-immobilized --confirm-fixed-path-clear
+```
+
+该入口加载项目环境，检查恢复锁存和设备/ROS 节点冲突，再启动缺少的相机、检测/observer、专用左臂驱动和一次性抓取程序。完整且名称匹配的现有节点复用；视觉链不完整、未知关节发布者、旧机械臂控制或底盘活动时停止并提示，不自动杀进程或清锁。无 master 且没有残留设备进程时由 roslaunch 启动 master。真实运行需要私有参考文件中的 `real_motion_enabled=true`。
+
+启动后最多等待 40 秒获得实际六关节反馈、轨迹状态、相机内参和新观察帧，随后仍执行原有标定、反馈、图检查及视觉门控。新启动的左臂驱动为 required 节点；I2C 无应答或六舵机反馈失败会使本次 managed launch 停止，不重试运动、不跳过反馈。相机/视觉就绪超时同样不会发送抓取轨迹。启动驱动本身包含当前姿态保持及使能力矩。
+
+成功一次后抓取程序退出，其余节点保持运行，便于检查与按原 Session 释放；不会自动再抓。终端需保持打开；Ctrl+C 关闭本入口启动的节点，复用的外部节点不受本入口管理。Ctrl+C 不等于关闭舵机力矩。重复执行仍需按上文用原 Session 完成恢复释放。
+
+本增补离线相关回归共 136 项通过（含既有未提交示教回归），新加 10 项覆盖依赖复用、冲突、残留进程、恢复锁存、显式真实运行门禁和实际消息就绪检查。尚未部署本增补或进行实体抓取；现场最新的 `Errno 6` I2C 无应答未被本增补解决。
+
+## 回退操作
 
 先停稳、清空夹爪并退出固定抓取程序与专用驱动；保留参考文件和现场修改，反向回退本次代码提交。不要通过切换入口直接执行旧 IK 流程。逐舵机模式是显式配置，旧驱动默认行为不变。原 C Action 和 A/B/D/E 任务逻辑未修改。
 
