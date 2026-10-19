@@ -9,7 +9,7 @@
   "wait_before_close_seconds": 3.0,
   "target_color": "yellow",
   "arm_frame": "arm_left/arm_base_link",
-  "trigger_radius_m": 0.005,
+  "trigger_radius_m": 0.020,
   "stable_seconds": 1.0,
   "min_frames": 3,
   "max_observation_age_seconds": 0.5,

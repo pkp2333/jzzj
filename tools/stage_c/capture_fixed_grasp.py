@@ -34,7 +34,7 @@ def capture(rospy,cfg,session):
         if identity is None:identity=key;anchor=point
         if key!=identity or separation(anchor,point)>.03:
             raise RuntimeError('Fruit identity/position changed during capture; reference not saved')
-        if any(separation(p,point)>cfg['trigger_radius_m'] for _,p in samples):samples=[]
+        if any(separation(p,point)>min(.005,cfg['trigger_radius_m']) for _,p in samples):samples=[]
         samples.append((stamp,point))
         if len(samples)>=cfg['min_frames'] and stamp-samples[0][0]>=cfg['stable_seconds']:
             centre=[sum(p[i] for _,p in samples)/len(samples) for i in range(3)]

@@ -28,7 +28,7 @@ def main():
     if args.command=='check':
         print('Fixed rear:',REAR_DEG,'approach:',OPEN_DEG,'close:',CLOSE_DEG)
         print('Reference metres:',cfg['reference_position_m'],'identity:',cfg['identity'])
-        print('Trigger: 5mm, 1 second, >=3 fresh frames. Wait after measured arrival: 3 seconds.')
+        print('Trigger: %gmm, 1 second, >=3 fresh frames. Wait after measured arrival: 3 seconds.' % (cfg['trigger_radius_m']*1000))
         print('No movement. Reference capture is not a physical grasp/path acceptance.');return
     if not (args.real and args.confirm_base_immobilized and args.confirm_fixed_path_clear):
         p.error('real operation requires --real --confirm-base-immobilized --confirm-fixed-path-clear')

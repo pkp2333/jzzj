@@ -71,18 +71,36 @@ class FixedSequenceTests(unittest.TestCase):
     def test_bad_reference_angles_and_calibration_fail_before_motion(self):
         for change in (lambda c:c.update(reference_position_m=None),lambda c:c.update(calibration_sha256='wrong'),
                        lambda c:c.update(grasp_close_angles_deg=[-1,56,58,50,72,-20]),
-                       lambda c:c.update(wait_before_close_seconds=0),lambda c:c.update(trigger_radius_m=.02)):
+                       lambda c:c.update(wait_before_close_seconds=0),lambda c:c.update(trigger_radius_m=.021)):
             c=config();change(c);io=Adapter();r=FixedSequence(io,c).run()
             self.assertFalse(r['motion_complete']);self.assertEqual(io.events,[])
 
 
 class VisualGateTests(unittest.TestCase):
-    def test_requires_three_distinct_fresh_frames_over_one_second_inside_total_5mm(self):
+    def test_requires_three_distinct_fresh_frames_over_one_second_inside_total_20mm(self):
         gate=ReferenceGate(config(),'s',1.)
         for s in (2.,2.3,2.6,2.9):self.assertIsNone(gate.add(s,'s','ok',[target(s)],s+.02))
         self.assertIsNotNone(gate.add(3.1,'s','ok',[target(3.1)],3.12))
-        gate=ReferenceGate(config(),'s',1.);p=list(config()['reference_position_m']);p[0]+=.004;p[1]+=.004
+        gate=ReferenceGate(config(),'s',1.);p=list(config()['reference_position_m']);p[0]+=.015;p[1]+=.015
         for s in (2.,2.4,2.8,3.2):self.assertIsNone(gate.add(s,'s','ok',[target(s,p)],s+.02))
+
+    def test_20mm_radius_accepts_19mm_rejects_21mm_and_retains_5mm_stability(self):
+        centre=config()['reference_position_m']
+        for offset,accepted in ((.019,True),(.021,False)):
+            gate=ReferenceGate(config(),'s',1.);point=list(centre);point[0]+=offset
+            result=None
+            for s in (2.,2.3,2.6,2.9,3.1):result=gate.add(s,'s','ok',[target(s,point)],s+.02)
+            self.assertEqual(result is not None,accepted)
+        gate=ReferenceGate(config(),'s',1.)
+        for i,s in enumerate((2.,2.3,2.6,2.9,3.1)):
+            point=list(centre);point[0]+=.01 if i%2 else -.01
+            self.assertIsNone(gate.add(s,'s','ok',[target(s,point)],s+.02))
+
+    def test_old_5mm_reference_retains_its_limit(self):
+        cfg=config();cfg['trigger_radius_m']=.005
+        gate=ReferenceGate(cfg,'s',1.);point=list(cfg['reference_position_m']);point[0]+=.006
+        for s in (2.,2.3,2.6,2.9,3.1):
+            self.assertIsNone(gate.add(s,'s','ok',[target(s,point)],s+.02))
 
     def test_empty_old_duplicate_and_stale_frames_do_not_complete_window(self):
         gate=ReferenceGate(config(),'s',1.)
