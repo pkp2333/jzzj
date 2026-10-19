@@ -104,6 +104,10 @@ class ChassisNode:
         self.car_task_sub = rospy.Subscriber("/task", Bool, self.task_cb)
         self.car_cmd_sub = rospy.Subscriber("/car_cmd", CarCmd, self.car_cmd_cb)
         self.cmd_vel_sub = rospy.Subscriber("/cmd_vel", Twist, self.cmd_vel_cb) 
+        self.fixed_navigation_watchdog=float(rospy.get_param('~fixed_navigation_watchdog',0.))
+        if not math.isfinite(self.fixed_navigation_watchdog) or not 0<=self.fixed_navigation_watchdog<=.3:
+            raise ValueError('fixed navigation watchdog must be in 0..0.3 seconds')
+        self.fixed_velocity_received=-math.inf
         if rospy.get_param('~stage_c_micro/enabled',False):
             from user_msgs.msg import StageCBaseCommand, StageCBaseStatus
             self.micro_status_type=StageCBaseStatus
@@ -202,6 +206,11 @@ class ChassisNode:
         
     @serialized
     def cmd_vel_cb(self, msg:Twist):
+        if getattr(self,'fixed_navigation_watchdog',0):
+            values=(msg.linear.x,msg.linear.y,msg.angular.z)
+            if (not all(math.isfinite(v) for v in values) or math.hypot(*values[:2])>.020000001 or values[2]!=0):
+                self.clear_motion();self.car_cmd=CarCmd.HOLD;self.ser.write(self.stop_data);return
+            self.fixed_velocity_received=time.monotonic()
         with self.io_lock:
             if self.micro.owner:
                 if all(v==0 for v in (msg.linear.x,msg.linear.y,msg.angular.z)):
@@ -289,6 +298,8 @@ class ChassisNode:
     @serialized
     def controller(self, *args):
         if self.delled:return
+        if getattr(self,'fixed_navigation_watchdog',0) and time.monotonic()-self.fixed_velocity_received>self.fixed_navigation_watchdog:
+            self.clear_motion();self.car_cmd=CarCmd.HOLD;self.ser.write(self.stop_data);return
         with self.io_lock:
             if self.micro.owner:
                 vx,vy=self.micro.tick(time.monotonic())

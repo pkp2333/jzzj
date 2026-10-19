@@ -13,7 +13,7 @@ if(STAGE_C_BUILD_KINEMATICS)
   add_dependencies(stage_c_kinematics ${catkin_EXPORTED_TARGETS})
   install(TARGETS stage_c_kinematics RUNTIME DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 endif()
-catkin_install_python(PROGRAMS scripts/stage_c_server.py scripts/stage_c_client.py scripts/stage_c_taught.py scripts/stage_c_fixed_grasp.py scripts/sim_context.py scripts/check_model.py scripts/check_fruit6.py scripts/run_verified_fruit6.py scripts/model_probe_overlay.py scripts/publish_fruit6_sample.py DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
+catkin_install_python(PROGRAMS scripts/stage_c_server.py scripts/stage_c_client.py scripts/stage_c_taught.py scripts/stage_c_fixed_grasp.py scripts/stage_c_fixed_navigation.py scripts/sim_context.py scripts/check_model.py scripts/check_fruit6.py scripts/run_verified_fruit6.py scripts/model_probe_overlay.py scripts/publish_fruit6_sample.py DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION})
 install(DIRECTORY launch params resources DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
 install(FILES README.md MODEL_FRUIT6.md DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION})
 
@@ -34,6 +34,7 @@ if(CATKIN_ENABLE_TESTING)
   add_test(NAME stage_c_taught_ros COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_taught_ros.py)
   add_test(NAME stage_c_fixed_grasp COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fixed_grasp.py)
   add_test(NAME stage_c_fixed_startup COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fixed_startup.py)
+  add_test(NAME stage_c_fixed_base COMMAND ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_fixed_base.py)
   add_test(NAME stage_c_planning_kdl COMMAND ${CMAKE_COMMAND} -E env
     "STAGE_C_KDL_PROBE=$<TARGET_FILE:kinematics_regression>"
     ${PYTHON_EXECUTABLE} -B ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_planning_kdl.py)

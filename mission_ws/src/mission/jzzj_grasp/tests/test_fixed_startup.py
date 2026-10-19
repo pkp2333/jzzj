@@ -125,8 +125,9 @@ class StartupTests(unittest.TestCase):
         self.assertEqual(args['real'], 'false')
         driver = [i for i in root.findall('include') if 'fixed_arm' in i.get('file')][0]
         self.assertIn(('required', 'true'), [(a.get('name'), a.get('value')) for a in driver])
-        runner = root.find('node')
-        self.assertEqual(runner.get('if'), '$(arg real)')
+        group=root.find("group[@if='$(arg real)']")
+        runner = group.find('node')
+        self.assertEqual(runner.get('unless'), '$(arg base_adjust)')
         self.assertIsNone(runner.get('respawn'))
         self.assertIsNone(runner.get('required'))
 

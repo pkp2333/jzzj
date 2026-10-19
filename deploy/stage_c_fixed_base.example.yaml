@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "calibration_confirmed": false,
+  "base_matrix": null,
+  "base_calibration_samples": [],
+  "pose_topic": "/front_car_pose_orig_map",
+  "pose_frame": "map",
+  "alignment_tolerance_m": 0.020,
+  "step_m": 0.050,
+  "total_m": null,
+  "max_steps": null,
+  "timeout_seconds": null,
+  "notes": "Fit measured body XY translation -> observed fruit arm XY change. Never assume identity or axis signs. No rotation. Fixed grasp angles unchanged."
+}

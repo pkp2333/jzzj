@@ -8,7 +8,7 @@ from .core import Failure,Observation,finite_vector
 from .fixed_grasp import ReferenceGate,SIGNS,OFFSETS_DEG,calibration_digest
 
 
-def wait_startup(rospy,seconds,cancel):
+def wait_startup(rospy,seconds,cancel,base_adjust=False):
     """Wait for actual dependency messages; never send commands or clear faults."""
     from sensor_msgs.msg import JointState,CameraInfo
     from jzzj_grasp_interfaces.msg import TargetObservations
@@ -32,6 +32,12 @@ def wait_startup(rospy,seconds,cancel):
             frame=message('/stage_c/observations',TargetObservations)
             if not -.05<=rospy.Time.now().to_sec()-frame.header.stamp.to_sec()<=.5:
                 raise RuntimeError('observations stale')
+            if base_adjust:
+                from geometry_msgs.msg import PoseStamped
+                from .fixed_base import map_pose
+                map_pose(message('/front_car_pose_orig_map',PoseStamped),rospy.Time.now().to_sec())
+                if rospy.get_param('/stage_c_fixed_navigation/bounded_micro_navigation',False) is not True:
+                    raise RuntimeError('bounded navigation not ready')
             return
         except Exception as exc:
             reason=str(exc);time.sleep(.1)
@@ -44,7 +50,7 @@ class FixedArm(RosArmBackend):
 
 
 class FixedRos:
-    def __init__(self,rospy,cfg,session,cancel):
+    def __init__(self,rospy,cfg,session,cancel,base_cfg=None):
         from jzzj_grasp_interfaces.msg import TargetObservations,TargetSelection
         from sensor_msgs.msg import JointState
         from std_msgs.msg import Bool
@@ -59,6 +65,10 @@ class FixedRos:
         self.stop_sub=rospy.Subscriber('/stage_c/fixed_grasp/stop',Bool,
                                      lambda m:cancel.set() if m.data else None,queue_size=1)
         self.arm.joint_cb(rospy.wait_for_message('/arm_left/joint_states',JointState,timeout=5.))
+        self.base=None
+        if base_cfg is not None:
+            from .fixed_base_ros import NavigationAlignment
+            self.base=NavigationAlignment(self,base_cfg)
 
     def observation(self,msg):
         targets=[Observation(o.header.stamp.to_sec(),o.session_id,o.header.frame_id,
@@ -76,8 +86,10 @@ class FixedRos:
             raise Failure('NOT_READY','fixed grasp requires exactly one canonical trajectory driver')
         if pubs.get('/arm_left/arm_joint_states'):
             raise Failure('NOT_READY','exit legacy arm_test and other legacy command publishers first')
-        for topic in ('/cmd_vel','/car_cmd','/stage_c/base/command'):
-            if pubs.get(topic) or subs.get(topic):raise Failure('NOT_READY','base controller must be stopped: '+topic)
+        if getattr(self,'base',None) is not None:self.base.graph(pubs,subs)
+        else:
+            for topic in ('/cmd_vel','/car_cmd','/stage_c/base/command'):
+                if pubs.get(topic) or subs.get(topic):raise Failure('NOT_READY','base controller must be stopped: '+topic)
         if pubs.get('/stage_c/base/status'):raise Failure('NOT_READY','micro base driver must be stopped')
         if not getattr(self,'releasing',False) and len(pubs.get('/stage_c/observations',[]))!=1:
             raise Failure('NOT_READY','one observer required')
@@ -85,8 +97,10 @@ class FixedRos:
 
     def guard(self):
         if self.cancel.is_set() or self.rospy.is_shutdown():raise Failure('CANCELED','operator/shutdown stop')
-        if time.monotonic()>self.deadline:raise Failure('TIMEOUT','fixed sequence deadline')
+        if time.monotonic()>self.deadline and not getattr(getattr(self,'base',None),'aligning',False):
+            raise Failure('TIMEOUT','fixed sequence deadline')
         self.arm.fresh_joints();self.check_graph()
+        if getattr(self,'base',None) is not None:self.base.guard()
 
     def calibration(self):
         from sensor_msgs.msg import CameraInfo
@@ -112,6 +126,7 @@ class FixedRos:
                 raise Failure('NOT_READY','fixed legacy-angle mapping mismatch: '+k)
         if not self.arm.client.wait_for_server(self.rospy.Duration(2.)):
             raise Failure('NOT_READY','trajectory server absent')
+        if getattr(self,'base',None) is not None:self.base.ready()
         self.guard()
         if calibration_digest(self.calibration())!=self.cfg['calibration_sha256']:
             raise Failure('NOT_READY','camera/table calibration changed since reference capture')
@@ -151,6 +166,7 @@ class FixedRos:
             raise Failure('MOTION_FAILED','fixed pose not reached in measured feedback')
 
     def wait_reference(self):
+        if self.base is not None:return self.base.align()
         gate=ReferenceGate(self.cfg,self.session,self.rospy.Time.now().to_sec());end=time.monotonic()+60.
         while time.monotonic()<end:
             self.guard()
@@ -160,13 +176,18 @@ class FixedRos:
                 p=gate.add(*frame,self.rospy.Time.now().to_sec())
                 if p is not None:return p
             time.sleep(.02)
-        raise Failure('NO_TARGET','fruit did not enter 5mm reference region for 1 second within 60 seconds')
+        raise Failure('NO_TARGET','fruit did not enter %gmm reference region for 1 second within 60 seconds' % (self.cfg['trigger_radius_m']*1000))
 
     def dwell(self,seconds):
         end=time.monotonic()+seconds
         while time.monotonic()<end:self.guard();time.sleep(.02)
 
-    def hold(self):return self.arm.hold(self.backend_cfg['stop_timeout'])
+    def hold(self):
+        base_ok=True
+        if getattr(self,'base',None) is not None:
+            try:self.base.stop()
+            except Exception:base_ok=False
+        return self.arm.hold(self.backend_cfg['stop_timeout']) and base_ok
 
     def release(self,session):
         from actionlib_msgs.msg import GoalStatusArray
