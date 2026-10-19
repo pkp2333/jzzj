@@ -29,9 +29,9 @@ def validate_reference(cfg):
     identity=cfg.get('identity',{})
     if not all(k in identity for k in ('class_id','label','color')) or identity['color']!=cfg.get('target_color'):
         raise ValueError('captured class/label/colour identity required')
-    if (cfg.get('trigger_radius_m') not in (.005,.020) or cfg.get('stable_seconds')!=1. or
+    if (cfg.get('trigger_radius_m') not in (.005,.020,.050) or cfg.get('stable_seconds')!=1. or
             cfg.get('min_frames')!=3 or cfg.get('max_observation_age_seconds')!=.5):
-        raise ValueError('fixed trigger requires 5mm or 20mm radius, 1 second, 3 frames and 0.5s freshness')
+        raise ValueError('fixed trigger requires 5mm, 20mm or 50mm radius, 1 second, 3 frames and 0.5s freshness')
     if not cfg.get('calibration_snapshot') or calibration_digest(cfg['calibration_snapshot'])!=cfg.get('calibration_sha256'):
         raise ValueError('capture calibration snapshot/hash missing or inconsistent')
     return cfg
