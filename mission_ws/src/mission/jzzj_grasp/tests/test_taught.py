@@ -136,6 +136,53 @@ class TaughtTests(unittest.TestCase):
         with self.assertRaises(ValueError):fit_base_matrix(bad,[0,0,1])
 
 
+class ArmOnlyTests(unittest.TestCase):
+    def setup_trial(self):
+        t=template();io=Adapter(t);io.locked=True
+        t.update(execution_mode='arm_only',base_calibrated=False,base_matrix=None,
+                 reference_position_m=None,identity={'color':'yellow'},bindings={'servo':'measured'})
+        t['empty_validation']={'template_hash':template_hash(t)}
+        def forbidden(*a,**kw):raise AssertionError('arm-only attempted base/vision operation')
+        for name in ('acquire_base','hold_base','lock_base','stop_base','pulse','observe'):
+            setattr(io,name,forbidden)
+        return t,io
+
+    def test_arm_only_completes_without_base_matrix_reference_or_any_base_call(self):
+        t,io=self.setup_trial()
+        r=Coordinator(io,t,lambda:io.clock,arm_only=True).run()
+        self.assertTrue(r['motion_complete'],r)
+        self.assertEqual(r['execution_mode'],'arm_only')
+        self.assertEqual(r['base_stop_evidence'],'operator_confirmed_physical_immobilization')
+        self.assertNotIn('grasp_confirmed',r)
+        self.assertLess(io.events.index('preflight'),io.events.index('arm'))
+
+    def test_modes_empty_approval_bindings_and_arm_gates_remain_enforced(self):
+        for change in (lambda t:t.update(execution_mode='base_alignment'),
+                       lambda t:t.update(real_motion_enabled=False),lambda t:t.update(start_rad=[]),
+                       lambda t:t.update(empty_validation={}),lambda t:t.update(bindings={}),
+                       lambda t:t['steps'][1].update(phase='lift')):
+            t,io=self.setup_trial();change(t)
+            r=Coordinator(io,t,lambda:io.clock,arm_only=True).run()
+            self.assertFalse(r['motion_complete']);self.assertNotIn('arm',io.events)
+        t,io=self.setup_trial();t['empty_validation']={}
+        self.assertTrue(Coordinator(io,t,lambda:io.clock,arm_only=True).run(empty=True)['motion_complete'])
+        with self.assertRaisesRegex(ValueError,'mode mismatch'):validate_template(t,require_empty=False)
+
+    def test_arm_failure_cancel_and_hold_failure_stop_sequence_without_base_calls(self):
+        for failure in ('arrival','cancel','hold'):
+            t,io=self.setup_trial()
+            if failure=='arrival':io.fail_execute=True
+            elif failure=='hold':io.fail_execute=True;io.arm_ok=False
+            else:
+                def cancel():
+                    if 'arm' in io.events:raise Failure('CANCELED','operator')
+                io.guard=cancel
+            r=Coordinator(io,t,lambda:io.clock,arm_only=True).run()
+            self.assertFalse(r['motion_complete']);self.assertEqual(io.events.count('arm'),1)
+            self.assertEqual(r['status'],{'arrival':'MOTION_FAILED','cancel':'CANCELED','hold':'STOP_FAILED'}[failure])
+            self.assertEqual(r['stop_confirmed'],failure!='hold')
+
+
 class SnapshotTests(unittest.TestCase):
     def snapshot(self):return Snapshot('s','arm',(1,'lemon','yellow'),1.,anchor=(.1,0,-.05))
     def frame(self,s,stamp,targets=True,session='s',diag='ok'):

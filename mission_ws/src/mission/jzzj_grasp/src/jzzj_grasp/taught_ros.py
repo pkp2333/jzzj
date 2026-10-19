@@ -111,11 +111,13 @@ class BaseClient:
 
 
 class RosAdapter:
-    def __init__(self,rospy,cfg,template,session,cancel):
+    def __init__(self,rospy,cfg,template,session,cancel,arm_only=False):
         from jzzj_grasp_interfaces.msg import TargetObservations,TargetSelection
         from std_msgs.msg import Bool
         self.rospy,self.cfg,self.template,self.session,self.cancel=rospy,cfg,template,session,cancel
-        cfg['active_profile']='tabletop';self.arm=TaughtArm(cfg);self.base=BaseClient(rospy,session,cancel)
+        self.arm_only=arm_only;self.isolation_checked=None
+        cfg['active_profile']='tabletop';self.arm=TaughtArm(cfg)
+        self.base=None if arm_only else BaseClient(rospy,session,cancel)
         self.frames=deque(maxlen=150);self.frame_lock=threading.RLock();self.last_frame=None
         self.after=0.;self.arm_started=False;self.deadline=time.monotonic()+360.
         self.capture_identity=None;self.selection_type=TargetSelection
@@ -137,14 +139,18 @@ class RosAdapter:
         self.pub.publish(m)
 
     def bindings(self):
-        from sensor_msgs.msg import CameraInfo
-        p=self.rospy.get_param('/stage_c_observer/perception')
-        info=self.rospy.wait_for_message(p['rgb_info_topic'],CameraInfo,timeout=5.)
-        observer_profile=self.rospy.get_param('/stage_c_observer/execution/profiles/tabletop')
         kin={k:self.rospy.get_param('/stage_c_kinematics/'+k) for k in ('tcp_offset_m','urdf')}
         kin['urdf_sha256']=hashlib.sha256(Path(kin.pop('urdf')).read_bytes()).hexdigest()
         arm={k:self.rospy.get_param('/arm_left/arm_trajectory/'+k) for k in
              ('servo_signs','servo_offsets_deg','servo_position_min','servo_position_max')}
+        if getattr(self,'arm_only',False):
+            profile=self.cfg['profiles']['tabletop']
+            return dict(table=digest({k:profile[k] for k in ('vertical_axis','table_plane_offset_m')}),
+                        tcp_model=digest(kin),servo=digest(arm))
+        from sensor_msgs.msg import CameraInfo
+        p=self.rospy.get_param('/stage_c_observer/perception')
+        info=self.rospy.wait_for_message(p['rgb_info_topic'],CameraInfo,timeout=5.)
+        observer_profile=self.rospy.get_param('/stage_c_observer/execution/profiles/tabletop')
         return dict(camera=digest(dict(perception=p,K=list(info.K),D=list(info.D),size=[info.width,info.height],frame=info.header.frame_id)),
                     table=digest({k:observer_profile[k] for k in ('vertical_axis','table_plane_offset_m')}),
                     tcp_model=digest(kin),servo=digest(arm))
@@ -152,8 +158,28 @@ class RosAdapter:
     def guard(self):
         if self.cancel.is_set() or self.rospy.is_shutdown():raise Failure('CANCELED','operator/shutdown stop')
         if time.monotonic()>self.deadline:raise Failure('TIMEOUT','taught execution deadline')
-        self.arm.fresh_joints();self.base.guard()
-        if self.base.owned and not self.arm_started:self.check_start(self.template['start_rad'])
+        self.arm.fresh_joints()
+        if getattr(self,'arm_only',False):
+            self.check_base_isolated()
+        else:
+            self.base.guard()
+            if self.base.owned and not self.arm_started:self.check_start(self.template['start_rad'])
+
+    def check_base_isolated(self,force=False):
+        """Graph evidence complements explicit physical immobilization, not odometry."""
+        now=time.monotonic()
+        if not force and self.isolation_checked is not None and now-self.isolation_checked<.2:return
+        import rosgraph
+        pubs,subs,_=rosgraph.Master(self.rospy.get_name()).getSystemState()
+        pubs,subs=dict(pubs),dict(subs)
+        for topic in ('/cmd_vel','/car_cmd','/stage_c/base/command'):
+            if pubs.get(topic) or subs.get(topic):
+                raise Failure('NOT_READY','arm-only requires base controllers stopped: '+topic)
+        if pubs.get('/stage_c/base/status'):
+            raise Failure('NOT_READY','stop micro base driver before arm-only test')
+        if pubs.get('/arm_left/joint_states')!=['/arm_left/arm_trajectory']:
+            raise Failure('NOT_READY','missing/duplicate canonical arm driver')
+        self.isolation_checked=now
 
     def ready(self):
         import rosgraph
@@ -164,7 +190,8 @@ class RosAdapter:
         for k in ('stop_failed_latched','holding_latched'):
             if self.rospy.get_param('/stage_c_server/'+k,False):raise Failure('NOT_READY','C server '+k)
         pubs,_,_=rosgraph.Master(self.rospy.get_name()).getSystemState();pubs=dict(pubs)
-        if len(pubs.get('/stage_c/base/status',[]))!=1:
+        if getattr(self,'arm_only',False):self.check_base_isolated(force=True)
+        elif len(pubs.get('/stage_c/base/status',[]))!=1:
             raise Failure('NOT_READY','missing/duplicate micro base status publisher')
         if pubs.get('/arm_left/joint_states')!=['/arm_left/arm_trajectory']:
             raise Failure('NOT_READY','missing/duplicate canonical arm driver')
@@ -207,6 +234,7 @@ class RosAdapter:
             current=q
 
     def acquire_base(self):
+        if getattr(self,'arm_only',False):raise Failure('NOT_READY','base acquisition forbidden in arm-only mode')
         try:self.base.acquire()
         finally:
             try:
@@ -242,6 +270,7 @@ class RosAdapter:
         raise Failure('NO_TARGET','no fresh stable target after base stop')
 
     def pulse(self,axis,speed,seconds):
+        if getattr(self,'arm_only',False):raise Failure('NOT_READY','base movement forbidden in arm-only mode')
         vector=[0.,0.];vector[axis]=speed;self.base.switch(1,tuple(vector));end=time.monotonic()+seconds
         try:
             while time.monotonic()<end:
@@ -258,8 +287,14 @@ class RosAdapter:
         finally:self.hold_base()
 
     def execute(self,step):
-        self.arm_started=True;self.base.guard()
-        if self.base.fresh_status().phase!='LOCKED':raise Failure('NOT_READY','base not locked')
+        self.arm_started=True
+        if getattr(self,'arm_only',False):
+            self.guard()
+            self.rospy.set_param('/stage_c/taught/recovery_required',True)
+            self.rospy.set_param('/stage_c/taught/arm_only_session',self.session)
+        else:
+            self.base.guard()
+            if self.base.fresh_status().phase!='LOCKED':raise Failure('NOT_READY','base not locked')
         actual=self.arm.measured();q=tuple(step['positions_rad'])
         if step['phase'] in ('open','close'):
             q=actual[:5]+(q[5],);self.fixed_planner.valid_joints(q)
@@ -276,4 +311,5 @@ class RosAdapter:
         except Exception:return False
 
     def close(self):
-        self.select(False);self.base.close()
+        self.select(False)
+        if self.base is not None:self.base.close()

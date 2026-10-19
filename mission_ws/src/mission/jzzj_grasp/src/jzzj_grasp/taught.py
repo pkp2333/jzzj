@@ -58,18 +58,23 @@ def validate_matrix(matrix):
     return a
 
 
-def validate_template(t,bindings=None,require_empty=True):
+def validate_template(t,bindings=None,require_empty=True,arm_only=False):
     """Validate complete data before issuing even a base acquisition command."""
     if t.get('version')!=1 or t.get('units')!='rad':raise ValueError('template version=1 and radians required')
-    for gate in ('real_motion_enabled','workspace_clear_confirmed','table_height_confirmed','base_calibrated'):
+    expected='arm_only' if arm_only else 'base_alignment'
+    if t.get('execution_mode','base_alignment')!=expected:raise ValueError('template execution mode mismatch')
+    gates=('real_motion_enabled','workspace_clear_confirmed','table_height_confirmed')
+    for gate in gates+(() if arm_only else ('base_calibrated',)):
         if t.get(gate) is not True:raise ValueError('template gate not confirmed: '+gate)
     if not t.get('bindings') or (bindings is not None and t['bindings']!=bindings):
         raise ValueError('camera/table/TCP/servo bindings missing or changed; reteach')
-    if not t.get('arm_frame') or not finite_vector(t.get('reference_position_m',[]),3):
-        raise ValueError('reference fruit coordinate required')
-    if not isinstance(t.get('identity'),dict) or not all(k in t['identity'] for k in ('class_id','label','color')):
-        raise ValueError('reference target identity required')
-    plane_basis(t['table_normal']);validate_matrix(t.get('base_matrix',[]))
+    if not t.get('arm_frame'):raise ValueError('arm frame required')
+    plane_basis(t['table_normal'])
+    if not arm_only:
+        if not finite_vector(t.get('reference_position_m',[]),3):raise ValueError('reference fruit coordinate required')
+        if not isinstance(t.get('identity'),dict) or not all(k in t['identity'] for k in ('class_id','label','color')):
+            raise ValueError('reference target identity required')
+        validate_matrix(t.get('base_matrix',[]))
     if not finite_vector(t.get('start_rad',[]),6):raise ValueError('six measured starting joints required')
     steps=t.get('steps',[]);phases=[];previous=t['start_rad']
     if not steps or len(steps)>150:raise ValueError('record a complete bounded taught sequence')
@@ -142,8 +147,9 @@ class Snapshot:
 
 class Coordinator:
     """Adapter owns transport and watchdogs. This state machine never calls IK."""
-    def __init__(self,adapter,template,now,config=None):
+    def __init__(self,adapter,template,now,config=None,arm_only=False):
         self.io,self.template,self.now=adapter,copy.deepcopy(template),now
+        self.arm_only=arm_only
         self.cfg=dict(DEFAULTS,**(config or {}));self.trace=[]
         for k,limit in DEFAULTS.items():
             v=self.cfg[k]
@@ -155,6 +161,7 @@ class Coordinator:
         if self.cfg['stable_seconds']<1.:raise ValueError('stable window must be at least one second')
 
     def run(self,empty=False):
+        if self.arm_only:return self.run_arm_only(empty)
         result={'status':'NOT_READY','motion_complete':False,'human_verdict':'pending','trace':self.trace}
         acquired=False;arm_started=False
         try:
@@ -209,6 +216,32 @@ class Coordinator:
             except Exception:base_ok=False
             result.update(status=getattr(exc,'code','NOT_READY') if arm_ok and base_ok else 'STOP_FAILED',
                           error=str(exc),stop_confirmed=bool(arm_ok and base_ok))
+        try:result['template_hash']=template_hash(self.template)
+        except (ValueError,TypeError):result['template_hash']=None
+        return result
+
+    def run_arm_only(self,empty=False):
+        """Fixed joints only; never acquire, command, or invent a base lock."""
+        result=dict(status='NOT_READY',motion_complete=False,human_verdict='pending',
+                    execution_mode='arm_only',trace=self.trace,
+                    base_stop_evidence='operator_confirmed_physical_immobilization')
+        arm_started=False
+        try:
+            validate_template(self.template,self.io.bindings(),require_empty=not empty,arm_only=True)
+            steps=split_sequence(self.template)
+            self.io.ready();self.io.wait_arm_still();self.io.check_start(self.template['start_rad'])
+            self.io.preflight(steps)
+            for step in steps:
+                self.io.guard();arm_started=True
+                self.trace.append(dict(step=step['phase'],target_rad=list(step['positions_rad'])))
+                self.trace[-1]['arrival']=self.io.execute(step)
+            if not self.io.hold_arm():raise Failure('STOP_FAILED','final measured arm hold failed')
+            result.update(status='MOTION_COMPLETE_AWAITING_OPERATOR',motion_complete=True,stop_confirmed=True)
+        except Exception as exc:
+            try:arm_ok=not arm_started or self.io.hold_arm()
+            except Exception:arm_ok=False
+            result.update(status=getattr(exc,'code','NOT_READY') if arm_ok else 'STOP_FAILED',
+                          error=str(exc),stop_confirmed=bool(arm_ok))
         try:result['template_hash']=template_hash(self.template)
         except (ValueError,TypeError):result['template_hash']=None
         return result
