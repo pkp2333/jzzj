@@ -11,11 +11,14 @@
   <arg name="target_color" default="yellow"/>
   <arg name="base_adjust" default="false"/>
   <arg name="base_config" default=""/>
-  <arg name="start_localization" default="true"/>
+  <arg name="base_state" default="$(eval arg('reference') + '.base_state.json')"/>
+  <arg name="mock_handoff" default="false"/>
+  <arg name="mock_args" default="$(eval '--mock-handoff' if arg('mock_handoff') else '')"/>
   <include if="$(arg base_adjust)" file="$(find jzzj_grasp)/launch/stage_c_fixed_base.launch">
     <arg name="real" value="$(arg real)"/>
     <arg name="base_config" value="$(arg base_config)"/>
-    <arg name="start_localization" value="$(arg start_localization)"/>
+    <arg name="reference" value="$(arg reference)"/>
+    <arg name="base_state" value="$(arg base_state)"/>
   </include>
   <include if="$(arg start_camera)" file="$(find ascamera)/launch/hp60c.launch">
     <arg name="flip_vertical" value="false"/>
@@ -35,8 +38,8 @@
   <node unless="$(arg base_adjust)" pkg="jzzj_grasp" type="stage_c_fixed_grasp.py" name="stage_c_fixed_grasp"
         args="run --reference &quot;$(arg reference)&quot; --real --confirm-base-immobilized --confirm-fixed-path-clear --wait-ready 40"
         output="screen"/>
-  <node if="$(arg base_adjust)" pkg="jzzj_grasp" type="stage_c_fixed_grasp.py" name="stage_c_fixed_grasp"
-        args="run --reference &quot;$(arg reference)&quot; --real --base-adjust --base-config &quot;$(arg base_config)&quot; --confirm-base-path-clear --confirm-fixed-path-clear --wait-ready 40"
+  <node if="$(arg base_adjust)" pkg="jzzj_grasp" type="stage_c_fruit_stage.py" name="stage_c_fixed_grasp"
+        args="--reference &quot;$(arg reference)&quot; --real --base-config &quot;$(arg base_config)&quot; --confirm-base-path-clear --confirm-fixed-path-clear $(arg mock_args)"
         output="screen"/>
   </group>
 </launch>

@@ -74,8 +74,7 @@ class FixedSequence:
     def __init__(self,io,cfg):self.io,self.cfg,self.trace=io,cfg,[]
 
     def run(self):
-        result=dict(status='NOT_READY',motion_complete=False,grasp_confirmed=False,
-                    human_verdict='pending',trace=self.trace)
+        result=dict(status='NOT_READY',motion_complete=False,success=False,trace=self.trace)
         started=False
         try:
             validate_reference(self.cfg)
@@ -87,6 +86,7 @@ class FixedSequence:
             point=self.io.wait_reference()
             self.trace.append(dict(step='VISUAL_ALIGNED',position_m=list(point)))
             self.io.guard()
+            if hasattr(self.io,'prepare_grasp'):self.io.prepare_grasp()
             self.trace.append(dict(step='APPROACH',angles_deg=list(OPEN_DEG)))
             self.io.move(OPEN_DEG)
             self.trace.append(dict(step='DWELL',seconds=DWELL_SECONDS))
@@ -95,7 +95,7 @@ class FixedSequence:
             self.trace.append(dict(step='CLOSE',angles_deg=list(CLOSE_DEG)))
             self.io.move(CLOSE_DEG)
             if not self.io.hold():raise Failure('STOP_FAILED','final measured hold failed')
-            result.update(status='FIXED_GRASP_SEQUENCE_COMPLETE_UNVERIFIED',motion_complete=True,stop_confirmed=True)
+            result.update(status='SUCCESS',success=True,motion_complete=True,stop_confirmed=True)
         except Exception as exc:
             try:stopped=not started or self.io.hold()
             except Exception:stopped=False

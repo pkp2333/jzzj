@@ -14,7 +14,7 @@ from jzzj_grasp.fixed_grasp import validate_reference,FixedSequence,REAR_DEG,OPE
 
 def main(argv=None):
     p=argparse.ArgumentParser(description=__doc__)
-    p.add_argument('command',choices=('check','run','release'))
+    p.add_argument('command',choices=('check','rear','run','release'))
     p.add_argument('--reference',required=True)
     p.add_argument('--real',action='store_true')
     p.add_argument('--confirm-base-immobilized',action='store_true')
@@ -30,6 +30,8 @@ def main(argv=None):
         import rospy
         argv=rospy.myargv(argv=['stage_c_fixed_grasp.py']+argv)[1:]
     args=p.parse_args(argv);cfg=json.loads(Path(args.reference).read_text(encoding='utf-8'))
+    if args.base_adjust and args.command!='check':
+        p.error('base adjustment requires the session handoff server: start_fixed_grasp.sh --base-adjust; use stage_c_control.py for takeover, handoff or recovery')
     if not math.isfinite(args.wait_ready) or not 0<=args.wait_ready<=60 or (args.wait_ready and args.command!='run'):
         p.error('--wait-ready requires run and a timeout in 0..60 seconds')
     validate_reference(cfg)
@@ -63,7 +65,11 @@ def main(argv=None):
             wait_startup(rospy,args.wait_ready,cancel,base_adjust=args.base_adjust)
         io=FixedRos(rospy,cfg,session,cancel,base_cfg=base_cfg)
         if args.command=='release':io.release(session);print('Fixed session released; no base command sent.');return
-        result=FixedSequence(io,cfg).run()
+        if args.command=='rear':
+            io.ready();io.validate_all((REAR_DEG,));io.move(REAR_DEG)
+            if not io.hold():raise RuntimeError('rear preparation measured arm hold failed; keep the session for recovery')
+            result=dict(status='REAR_READY',motion_complete=True,stop_confirmed=True,trace=[dict(step='REAR_READY',angles_deg=list(REAR_DEG))])
+        else:result=FixedSequence(io,cfg).run()
         if io.base is not None:result.update(base_trace=io.base.trace,base_alignment_enabled=True)
         result.update(session=session,reference_file=str(Path(args.reference).resolve()),
                       reference_position_m=cfg['reference_position_m'],calibration_sha256=cfg['calibration_sha256'],

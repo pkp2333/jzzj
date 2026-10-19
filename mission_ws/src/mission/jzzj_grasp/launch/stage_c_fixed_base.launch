@@ -1,23 +1,23 @@
 <launch>
   <arg name="real" default="false"/>
   <arg name="base_config"/>
-  <arg name="start_localization" default="true"/>
+  <arg name="reference"/>
+  <arg name="base_state"/>
   <group if="$(arg real)">
-    <include if="$(arg start_localization)" file="$(find car_localization)/launch/car_localization.launch">
-      <arg name="open_camera" value="false"/>
-      <arg name="visualize" value="false"/>
-      <arg name="rviz" value="false"/>
-    </include>
     <rosparam command="load" file="$(find user_params)/params/chassis_config.yaml"/>
     <param name="chassis/max_vel_linear" value="0.02"/>
     <param name="chassis/activate_zone_xy" value="0.0"/>
     <param name="chassis/activate_zone_z" value="0.0"/>
     <node pkg="chassis" name="chassis" type="chassis_control_node.py" output="screen" required="true">
       <param name="fixed_navigation_watchdog" value="0.3"/>
+      <param name="fixed_calib_interface" value="true"/>
       <param name="stage_c_micro/enabled" value="false"/>
+      <rosparam command="load" file="$(find user_params)/params/chassis_config.yaml" ns="handoff_defaults"/>
     </node>
     <node pkg="jzzj_grasp" name="stage_c_fixed_navigation" type="stage_c_fixed_navigation.py" output="screen" required="true">
       <param name="config" value="$(arg base_config)"/>
+      <param name="reference" value="$(arg reference)"/>
+      <param name="state_path" value="$(arg base_state)"/>
     </node>
   </group>
 </launch>

@@ -52,10 +52,10 @@ class Adapter:
 
 
 class FixedSequenceTests(unittest.TestCase):
-    def test_exact_sequence_runs_once_and_never_reports_grasp_success(self):
+    def test_exact_sequence_runs_once_and_reports_success_after_action_completion(self):
         io=Adapter();result=FixedSequence(io,config()).run()
         self.assertTrue(result['motion_complete'],result)
-        self.assertFalse(result['grasp_confirmed']);self.assertEqual(result['human_verdict'],'pending')
+        self.assertTrue(result['success']);self.assertEqual(result['status'],'SUCCESS')
         self.assertEqual(io.events,['ready',('validate',(REAR_DEG,OPEN_DEG,CLOSE_DEG)),
                                   ('move',REAR_DEG),'vision',('move',OPEN_DEG),('wait',3.),('move',CLOSE_DEG),'hold'])
         self.assertEqual(OPEN_DEG[:5],CLOSE_DEG[:5]);self.assertEqual((OPEN_DEG[5],CLOSE_DEG[5]),(60,20))

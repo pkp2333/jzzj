@@ -5,8 +5,7 @@ unset CMAKE_PREFIX_PATH ROS_PACKAGE_PATH PYTHONPATH LD_LIBRARY_PATH PKG_CONFIG_P
 stage_c_base_packages='user_msgs;user_params;chassis;arm;ascamera;usb_cam;yolov5_rknn'
 stage_c_mission_packages='jzzj_grasp_interfaces;jzzj_visual_servo;jzzj_grasp;jzzj_misson'
 if [[ "${1:-}" == '--with-base-navigation' ]]; then
-  stage_c_base_packages+=';apriltag_localization'
-  stage_c_mission_packages+=';car_localization'
+  echo 'Building stage-C fruit-relative base adapter; no Tag localization dependency'
 elif [[ $# -gt 0 ]]; then
   echo 'Usage: build.sh [--with-base-navigation]' >&2
   exit 2

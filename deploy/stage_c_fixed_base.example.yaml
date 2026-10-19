@@ -1,14 +1,19 @@
 {
-  "version": 1,
+  "version": 2,
+  "body_axes": "x_forward_y_left",
+  "drive_interface": "chassis_calib_d_forward_cyy_right_v1",
   "calibration_confirmed": false,
+  "stationary_fruit_confirmed": false,
+  "rigid_camera_confirmed": false,
+  "translation_only_confirmed": false,
   "base_matrix": null,
   "base_calibration_samples": [],
-  "pose_topic": "/front_car_pose_orig_map",
-  "pose_frame": "map",
+  "feedback_topic": "/stage_c/base/visual_feedback",
+  "target_frame": "stage_c_body",
   "alignment_tolerance_m": 0.020,
   "step_m": 0.050,
   "total_m": null,
   "max_steps": null,
   "timeout_seconds": null,
-  "notes": "Fit measured body XY translation -> observed fruit arm XY change. Never assume identity or axis signs. No rotation. Fixed grasp angles unchanged."
+  "notes": "No Tag/map dependency. Ruler-calibrated body XY -> fixed-fruit arm XY change. Yaw and fruit motion are not independently observable."
 }

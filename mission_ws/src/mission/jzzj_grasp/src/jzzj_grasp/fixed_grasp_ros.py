@@ -33,11 +33,8 @@ def wait_startup(rospy,seconds,cancel,base_adjust=False):
             if not -.05<=rospy.Time.now().to_sec()-frame.header.stamp.to_sec()<=.5:
                 raise RuntimeError('observations stale')
             if base_adjust:
-                from geometry_msgs.msg import PoseStamped
-                from .fixed_base import map_pose
-                map_pose(message('/front_car_pose_orig_map',PoseStamped),rospy.Time.now().to_sec())
                 if rospy.get_param('/stage_c_fixed_navigation/bounded_micro_navigation',False) is not True:
-                    raise RuntimeError('bounded navigation not ready')
+                    raise RuntimeError('fruit-relative adapter not ready')
             return
         except Exception as exc:
             reason=str(exc);time.sleep(.1)
@@ -115,7 +112,6 @@ class FixedRos:
             if self.rospy.get_param('/stage_c_server/'+k,False):raise Failure('NOT_READY','C server '+k)
         if self.rospy.get_param('/stage_c/taught/recovery_required',False):
             raise Failure('NOT_READY','previous session requires explicit release')
-        self.check_graph(force=True)
         for k in ('hardware_enabled','calibration_confirmed','workspace_clear_confirmed'):
             if self.rospy.get_param('/arm_left/arm_trajectory/'+k,False) is not True:
                 raise Failure('NOT_READY','trajectory driver gate: '+k)
@@ -126,7 +122,10 @@ class FixedRos:
                 raise Failure('NOT_READY','fixed legacy-angle mapping mismatch: '+k)
         if not self.arm.client.wait_for_server(self.rospy.Duration(2.)):
             raise Failure('NOT_READY','trajectory server absent')
+        if calibration_digest(self.calibration())!=self.cfg['calibration_sha256']:
+            raise Failure('NOT_READY','camera/table calibration changed since reference capture')
         if getattr(self,'base',None) is not None:self.base.ready()
+        self.check_graph(force=True)
         self.guard()
         if calibration_digest(self.calibration())!=self.cfg['calibration_sha256']:
             raise Failure('NOT_READY','camera/table calibration changed since reference capture')
@@ -188,6 +187,9 @@ class FixedRos:
             try:self.base.stop()
             except Exception:base_ok=False
         return self.arm.hold(self.backend_cfg['stop_timeout']) and base_ok
+
+    def prepare_grasp(self):
+        if self.base is not None:self.base.prepare_grasp()
 
     def release(self,session):
         from actionlib_msgs.msg import GoalStatusArray

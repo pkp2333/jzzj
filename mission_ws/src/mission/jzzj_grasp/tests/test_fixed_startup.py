@@ -52,6 +52,35 @@ class StartupTests(unittest.TestCase):
                 runner.main(['check','--reference',str(ref)])
             self.assertIn('50mm',output.getvalue())
 
+    def test_rear_calibration_preparation_moves_only_rear_pose(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ref=Path(tmp)/'reference.json';cfg=config();cfg['real_motion_enabled']=True;ref.write_text(json.dumps(cfg))
+            events=[]
+            fake_ros=types.SimpleNamespace(init_node=lambda *a,**kw:None,on_shutdown=lambda *a:None)
+            class IO:
+                base=None
+                arm=types.SimpleNamespace(sent=True)
+                def __init__(self,*a,**kw):pass
+                def ready(self):events.append('ready')
+                def validate_all(self,poses):events.append(('validate',poses))
+                def move(self,pose):events.append(('move',pose))
+                def hold(self):events.append('hold');return True
+                def close(self):events.append('close')
+            with patch.dict('sys.modules',{'rospy':fake_ros}),patch.object(runner.signal,'signal'),\
+                    patch('jzzj_grasp.execution_lease.ExecutionLease',return_value=types.SimpleNamespace(close=lambda:None)),\
+                    patch('jzzj_grasp.fixed_grasp_ros.FixedRos',IO),contextlib.redirect_stdout(io.StringIO()):
+                runner.main(['rear','--reference',str(ref),'--real','--confirm-base-immobilized','--confirm-fixed-path-clear'])
+            from jzzj_grasp.fixed_grasp import REAR_DEG
+            self.assertEqual([e for e in events if isinstance(e,tuple) and e[0]=='move'],[('move',REAR_DEG)])
+
+    def test_direct_base_entry_cannot_bypass_handoff(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            ref=Path(tmp)/'reference.json';ref.write_text(json.dumps(config()))
+            for command in ('run','release','rear'):
+                with contextlib.redirect_stderr(io.StringIO()) as error,self.assertRaises(SystemExit):
+                    runner.main([command,'--reference',str(ref),'--base-adjust'])
+                self.assertIn('session handoff server',error.getvalue())
+
     def test_empty_graph_starts_dependencies(self):
         self.assertTrue(all(startup.launch_flags(graph()).values()))
 

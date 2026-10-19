@@ -108,6 +108,15 @@ class ChassisNode:
         if not math.isfinite(self.fixed_navigation_watchdog) or not 0<=self.fixed_navigation_watchdog<=.3:
             raise ValueError('fixed navigation watchdog must be in 0..0.3 seconds')
         self.fixed_velocity_received=-math.inf
+        self.fixed_calib_interface=rospy.get_param('~fixed_calib_interface',False) is True
+        if self.fixed_navigation_watchdog:
+            from user_msgs.msg import StageCBaseStatus
+            from std_srvs.srv import SetBool,SetBoolResponse
+            self.fixed_status_type=StageCBaseStatus
+            self.fixed_status_pub=rospy.Publisher('/stage_c/base/drive_status',StageCBaseStatus,queue_size=1)
+            self.fixed_profile_response=SetBoolResponse
+            self.fixed_handoff_defaults=rospy.get_param('~handoff_defaults/chassis',None)
+            self.fixed_profile_service=rospy.Service('~stage_c_profile',SetBool,self.fixed_profile)
         if rospy.get_param('~stage_c_micro/enabled',False):
             from user_msgs.msg import StageCBaseCommand, StageCBaseStatus
             self.micro_status_type=StageCBaseStatus
@@ -237,9 +246,15 @@ class ChassisNode:
                                   activate_zone=self.z_activate_zone, 
                                   clamp=self.max_vel_angular)
         
-        vel = [-int(msg.linear.y * self.vel_2_0x40), 
-               -int(msg.linear.x * self.vel_2_0x40), 
-               int(msg.angular.z * self.omega_2_0x40)]
+        if getattr(self,'fixed_calib_interface',False):
+            # Same serial channels as chassis_calib.py: d+ is forward,
+            # cyy+ is right. Stage-C body axes follow the PDF: X forward, Y left.
+            # Reuse channel semantics, never the old half-speed timed moves.
+            vel=[int(msg.linear.x*self.vel_2_0x40),-int(msg.linear.y*self.vel_2_0x40),0]
+        else:
+            vel = [-int(msg.linear.y * self.vel_2_0x40),
+                   -int(msg.linear.x * self.vel_2_0x40),
+                   int(msg.angular.z * self.omega_2_0x40)]
                
         body = self.gen_body(vel)
         self.chassis_cmd_data = self.head + [self.vel_mode & 0xff] + body + self.tail
@@ -295,11 +310,54 @@ class ChassisNode:
             m.serial_stop_written=self.micro_stop_written;m.diagnostic=self.micro.diagnostic
             self.micro_pub.publish(m)
 
+    def fixed_drive_status(self,written,diagnostic):
+        if hasattr(self,'fixed_status_pub'):
+            m=self.fixed_status_type();m.header.stamp=rospy.Time.now();m.phase='HOLD' if written else 'UNCONFIRMED'
+            m.serial_stop_written=written;m.diagnostic=diagnostic+'; serial acknowledgement only, no encoder measurement'
+            self.fixed_status_pub.publish(m)
+
+    @serialized
+    def fixed_profile(self,req):
+        if getattr(req,'_connection_header',{}).get('callerid')!='/stage_c_fixed_grasp':
+            return self.fixed_profile_response(False,'only the session-owning stage-C coordinator may switch profiles')
+        if self.car_cmd not in (CarCmd.HOLD,CarCmd.ARRIVE) or self.micro.owner:
+            return self.fixed_profile_response(False,'base must be in HOLD without another owner')
+        defaults=self.fixed_handoff_defaults
+        if not isinstance(defaults,dict):return self.fixed_profile_response(False,'normal chassis profile snapshot missing')
+        try:
+            if self.ser.write(self.stop_data)!=len(self.stop_data):raise IOError('short zero write')
+            values={key:float(defaults[key]) for key in ('dead_zone_xy','activate_zone_xy','dead_zone_z','activate_zone_z','max_vel_linear','max_vel_angular')}
+            if not all(math.isfinite(v) and v>=0 for v in values.values()):raise ValueError('invalid normal profile')
+            self.clear_motion();self.fixed_velocity_received=-math.inf
+            self.xy_dead_zone=0. if req.data else values['dead_zone_xy']
+            self.xy_activate_zone=0. if req.data else values['activate_zone_xy']
+            self.z_dead_zone=0. if req.data else values['dead_zone_z']/self.RA2DE
+            self.z_activate_zone=0. if req.data else values['activate_zone_z']/self.RA2DE
+            self.max_vel_linear=.02 if req.data else values['max_vel_linear']
+            self.max_vel_angular=0. if req.data else values['max_vel_angular']/self.RA2DE
+            self.fixed_navigation_watchdog=.3 if req.data else 0.
+            self.fixed_calib_interface=bool(req.data)
+            rospy.set_param('~fixed_navigation_watchdog',self.fixed_navigation_watchdog)
+            rospy.set_param('~fixed_calib_interface',self.fixed_calib_interface)
+            for key,value in (('max_vel_linear',self.max_vel_linear),('activate_zone_xy',self.xy_activate_zone),
+                              ('activate_zone_z',0. if req.data else values['activate_zone_z'])):
+                rospy.set_param('chassis/'+key,value)
+            return self.fixed_profile_response(True,'bounded C profile' if req.data else 'normal profile restored in HOLD; no navigation started')
+        except Exception as exc:
+            self.clear_motion();self.fixed_write_stop();return self.fixed_profile_response(False,str(exc))
+
+    def fixed_write_stop(self):
+        try:
+            complete=self.ser.write(self.stop_data)==len(self.stop_data)
+            self.fixed_drive_status(complete,'zero packet written' if complete else 'short serial write')
+        except Exception as exc:
+            self.fixed_drive_status(False,str(exc));rospy.logwarn_throttle(1.,'fixed navigation stop write failed: %s',exc)
+
     @serialized
     def controller(self, *args):
         if self.delled:return
         if getattr(self,'fixed_navigation_watchdog',0) and time.monotonic()-self.fixed_velocity_received>self.fixed_navigation_watchdog:
-            self.clear_motion();self.car_cmd=CarCmd.HOLD;self.ser.write(self.stop_data);return
+            self.clear_motion();self.car_cmd=CarCmd.HOLD;self.fixed_write_stop();return
         with self.io_lock:
             if self.micro.owner:
                 vx,vy=self.micro.tick(time.monotonic())
@@ -319,7 +377,8 @@ class ChassisNode:
             return
         
         if self.car_cmd == CarCmd.HOLD or self.car_cmd == CarCmd.ARRIVE:
-            self.ser.write(self.stop_data)
+            if getattr(self,'fixed_navigation_watchdog',0):self.fixed_write_stop()
+            else:self.ser.write(self.stop_data)
             self.chassis_cmd_data=list(self.stop_data)
             self.last_chassis_cmd_data = self.stop_data
             return
@@ -333,6 +392,7 @@ class ChassisNode:
         if self.chassis_cmd_data != self.last_chassis_cmd_data:
             self.ser.write(self.chassis_cmd_data)
             self.last_chassis_cmd_data = self.chassis_cmd_data
+        if getattr(self,'fixed_navigation_watchdog',0):self.fixed_drive_status(False,'motion mode active')
     
     
 if __name__ == '__main__':
